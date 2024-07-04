@@ -2,17 +2,19 @@
 
 {% block content %}
 <style>
-    .controller-box{
+    .controller-box {
         text-align: center;
     }
 </style>
 
 <script>
     let selectedDrone = 0;
+    let selectedVersion = 0;
+    let selectedTrajectory = 0;
 
-    $(document).ready(function(){
+    $(document).ready(function() {
         $('#drone1').change(function() {
-            if(this.checked) {
+            if (this.checked) {
                 selectedDrone = 1;
                 $('#drone2').prop('checked', false);
                 $('#all').prop('checked', false);
@@ -23,7 +25,7 @@
 
         });
         $('#drone2').change(function() {
-            if(this.checked) {
+            if (this.checked) {
                 selectedDrone = 2;
                 $('#drone1').prop('checked', false);
                 $('#all').prop('checked', false);
@@ -33,7 +35,7 @@
             console.log(selectedDrone);
         });
         $('#all').change(function() {
-            if(this.checked) {
+            if (this.checked) {
                 selectedDrone = 0;
                 $('#drone1').prop('checked', false);
                 $('#drone2').prop('checked', false);
@@ -42,34 +44,65 @@
             }
             console.log(selectedDrone);
         });
+
+        $('#startTrajectoryBtn').click(function() {
+            $('#trajectoryModal').show();
+        });
+
+        $('#selectVersionBtn').click(function() {
+            selectedVersion = $('input[name="version"]:checked').val();
+            $('#trajectoryModal').hide();
+            $('#trajectoryTypeModal').show();
+            console.log("Selected version:", selectedVersion);
+        });
+
+        $('#selectTrajectoryBtn').click(function() {
+            selectedTrajectory = $('input[name="trajectory"]:checked').val();
+            $('#trajectoryTypeModal').hide();
+            sendCommand('startTrajectory', { version: selectedVersion, trajectory: selectedTrajectory });
+            console.log("Selected trajectory:", selectedTrajectory);
+        });
     });
 
-    function sendCommand(command, params={}){
-        console.log({action: 'sendCommand', command: command, params: params})
-        params['command'] = command
-        params['idDrone'] = selectedDrone
-        $.post("/api/command/", params).done(function (json){
-            console.log({action: 'sendCommand', json: json})
-        }, 'json')
+    function sendCommand(command, params = {}) {
+        console.log({ action: 'sendCommand', command: command, params: params });
+        params['command'] = command;
+        params['idDrone'] = selectedDrone;
+        $.post("/api/command/", params).done(function(json) {
+            console.log({ action: 'sendCommand', json: json });
+        }, 'json');
     }
 
-    // function snapShot(){
-    //     $.post("/api/command/", {'command': 'snapshot'}).done(function (json){
-    //         $('#div-snapshot').show();
-    //         $('#snapshot').attr('src',  $('#snapshot').attr('src') + '?' + Math.random());
-    //     }, 'json')
-    // }
+    function showFileInput() {
+        document.getElementById('fileForm').style.display = 'block';
+    }
+
+    function submitFile() {
+        let formData = new FormData();
+        formData.append('file', document.getElementById('file').files[0]);
+        formData.append('file2', document.getElementById('file2').files[0]);
+        formData.append('idDrone', selectedDrone);
+        console.log({ action: 'submitFile', formData: formData });
+        $.ajax({
+            url: '/api/upload/',
+            type: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            success: function(data) {
+                console.log({ action: 'submitFile', data: data });
+            }
+        });
+    }
 
     $(document).on('pageinit', function() {
-        $('#slider-speed').on("slidestop", function (event) {
+        $('#slider-speed').on("slidestop", function(event) {
             let params = {
                 speed: $("#slider-speed").val(),
             };
             sendCommand('speed', params);
         });
     });
-
-
 </script>
 
 <div class="controller-box">
@@ -156,13 +189,57 @@
 <div class="controller-box">
     <h3>ADVANCED MODE</h3>
     <div data-role="controlgroup" data-type="horizontal">
-        <a href="#" data-role="button" data-inline="true" onclick="sendCommand('startTrajectory'); return false;">Start Trajectory</a>
+        <a href="#" data-role="button" data-inline="true" id="startTrajectoryBtn">Start Trajectory</a>
         <a href="#" data-role="button" data-inline="true" onclick="sendCommand('stopTrajectory'); return false;">Stop Trajectory</a>
         <a href="#" data-role="button" data-inline="true" onclick="sendCommand('draw'); return false;">Draw Trajectory</a>
     </div>
 </div>
 
-<!-- Checkbox ara indicar si usar el drone 1, el drone 2 o ambos -->
+<!-- Modal para seleccionar versión -->
+<div id="trajectoryModal" style="display: none;">
+    <h3>Seleccionar Versión</h3>
+    <div>
+        <input type="radio" id="version1" name="version" value="0">
+        <label for="version1">Versión 1</label>
+    </div>
+    <div>
+        <input type="radio" id="version2" name="version" value="1">
+        <label for="version2">Versión 2</label>
+    </div>
+    <div>
+        <input type="radio" id="version3" name="version" value="2">
+        <label for="version3">Versión 3</label>
+    </div>
+    <a href="#" data-role="button" id="selectVersionBtn">Seleccionar Versión</a>
+</div>
+
+<!-- Modal para seleccionar tipo de trayectoria -->
+<div id="trajectoryTypeModal" style="display: none;">
+    <h3>Seleccionar Tipo de Trayectoria</h3>
+    <div>
+        <input type="radio" id="cuadrado" name="trajectory" value="0">
+        <label for="cuadrado">Cuadrado</label>
+    </div>
+    <div>
+        <input type="radio" id="circulo" name="trajectory" value="1">
+        <label for="circulo">Círculo</label>
+    </div>
+    <div>
+        <input type="radio" id="ovalo" name="trajectory" value="2">
+        <label for="ovalo">Óvalo</label>
+    </div>
+    <div>
+        <input type="radio" id="espiral" name="trajectory" value="3">
+        <label for="espiral">Espiral</label>
+    </div>
+    <div>
+        <input type="radio" id="ocho" name="trajectory" value="4">
+        <label for="ocho">Ocho</label>
+    </div>
+    <a href="#" data-role="button" id="selectTrajectoryBtn">Seleccionar Trayectoria</a>
+</div>
+
+<!-- Checkbox para indicar si usar el drone 1, el drone 2 o ambos -->
 <div class="controller-box">
     <h3>Drone</h3>
     <div data-role="controlgroup" data-type="horizontal">
@@ -178,48 +255,15 @@
 <div class="controller-box">
     <div data-role="controlgroup" data-type="horizontal">
         <a href="#" data-role="button" onclick="sendCommand('battery'); return false;">Battery</a>
+        <a href="#" data-role="button" onclick="showFileInput(); return false;">Seleccionar Archivos</a>
     </div>
 </div>
 
-<!-- <div class="controller-box">
-    <h3>ADVANCED MODE</h3>
-    <div data-role="controlgroup" data-type="horizontal">
-        <a href="#" data-role="button" data-inline="true" onclick="sendCommand('patrol'); return false;">Patrol</a>
-        <a href="#" data-role="button" data-inline="true" onclick="sendCommand('stopPatrol'); return false;">Stop Patrol</a>
-        <a href="#" data-role="button" data-inline="true" onclick="sendCommand('faceDetectAndTrack'); return false;">Face Detect And Track</a>
-        <a href="#" data-role="button" data-inline="true" onclick="sendCommand('stopFaceDetectAndTrack'); return false;">Stop Face Detect And Track</a>
-    </div>
-    <br>
-    <img src="/video/streaming">
+<div class="controller-box" id="fileForm" style="display: none;">
+    <h3>Seleccionar Archivos</h3>
+    <input type="file" id="file" name="file" accept=".txt">
+    <input type="file" id="file2" name="file2" accept=".txt">
+    <a href="#" data-role="button" onclick="submitFile(); return false;">Enviar Archivos</a>
 </div>
-
-<div class="controller-box">
-    <h3>CAMERA</h3>
-    <a href="#" data-role="button" data-inline="true" 
-    onclick="snapShot(); return false;">Snapshot</a>
-    <br>
-    <div id="div-snapshot" style="display: none">
-        <img id="snapshot" src="/static/img/snapshots/snapshot.jpg">
-    </div>
-</div>
-<div data-role="controlgroup" data-type="horizontal">
-    <div class="controller-box" style="display: inline-block;">
-        <h3>VIDEO</h3>
-        <a href="#" data-role="button" data-inline="true" 
-        onclick="sendCommand('takeVideo'); return false;">Take Video</a>
-        <br>
-        <a href="#" data-role="button" data-inline="true" 
-        onclick="sendCommand('stopVideo'); return false;">Stop Video</a>
-    </div>
-    <div class="controller-box" style="display: inline-block;">
-        <h3>FRAMES</h3>
-        <a href="#" data-role="button" data-inline="true" 
-        onclick="sendCommand('takeFrames'); return false;">Take Frames</a>
-        <br>
-        <a href="#" data-role="button" data-inline="true" 
-        onclick="sendCommand('stopFrames'); return false;">Stop Frames</a>
-    </div>
-</div> -->
-
 
 {% endblock %}

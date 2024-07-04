@@ -11,6 +11,9 @@ import pytello.config
 import rospy
 import sys
 from multiprocessing import Process
+import numpy as np
+import matplotlib.pyplot as plt
+import pytello.droneapp.models.functions as fn
 
 logging.basicConfig(level=logging.DEBUG)
                     #filename=pytello.config.LOG_FILE)
@@ -33,12 +36,28 @@ def index():
 def controller():
     return render_template('controller.html')
 
+@app.route('/api/upload/', methods=['POST'])
+def upload():
+    try:
+        rospy.loginfo('Recibiendo archivos...')
+        file = request.files['file']
+        file2 = request.files['file2']
+        
+        fn.grafica(file.filename, file2.filename)
+        rospy.loginfo('Archivos recibidos y procesados correctamente')
+    except Exception as e:
+        rospy.loginfo({'error': str(e)})
+        return 'Error al recibir los archivos', 400
+    return 'Archivos recibidos y procesados correctamente'
+
 
 @app.route('/api/command/', methods=['POST'])
 def command():
     try:
         cmd = request.form.get('command')
         idDrone = request.form.get('idDrone') # 0 si son todos, 1 si es el primero, 2 si es el segundo, etc.
+        trajectory = int(request.form.get('trajectory')) # 0: cuadrado, 1: circulo, 2: ovalo, 3: espiral, 4:ocho
+        version = int(request.form.get('version')) # 0: version 1, 1: version 2, 2: version 3
 
         # Comprobar que el id es menor que el número de drones
         if idDrone is not None:
@@ -108,12 +127,12 @@ def command():
         if cmd == 'startTrajectory':
             if idDrone == 0:
                 for id_drone in range(len(drones)):
-                    process = Process(target=drone.start_trajectory, args=(id_drone + 1,))
+                    process = Process(target=drone.start_trajectory, args=(id_drone + 1,trajectory,version))
                     process.start()
             else:
-                drone.start_trajectory(idDrone)
+                drone.start_trajectory(idDrone, trajectory, version)
         if cmd == 'stopTrajectory':
-            drone.stop_trajectory(idDrone)
+            drone.stop_trajectory(idDrone, trajectory, version)
         if cmd == 'battery':
             drone.battery(idDrone)
         if cmd == 'draw':

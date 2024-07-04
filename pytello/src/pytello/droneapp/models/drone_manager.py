@@ -14,12 +14,18 @@ import numpy as np
 import geometry_msgs.msg
 import rospy
 from std_msgs.msg import String
+import std_msgs.msg
 import nav_msgs.msg
 
 from pytello.droneapp.models.base import Singleton
 import pytello.droneapp.models.functions as fn
+import pytello.droneapp.models.trajectories as tr
 
 import visualization_msgs.msg
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
+from geometry_msgs.msg import Twist
 
 
 logger = logging.getLogger(__name__)
@@ -55,16 +61,15 @@ DEFAULT_DIRECTION = 'l'
 #     """Error no image dir"""
 
 class DroneManager(metaclass=Singleton):
-    def __init__(self, host_ip='', host_port=8889,
-                 drone_ip='192.168.0.116', drone_port=8889,
-                 is_imperial=False, speed=DEFAULT_SPEED, drones=['192.168.0.116']):
+    def __init__(self, host_ip='', host_port=8889, 
+                 drone_port=8889, drones=['192.168.0.116']):
         self.host_ip = host_ip
         self.host_port = host_port
-        self.drone_ip = drone_ip
+        # self.drone_ip = drone_ip
         self.drone_port = drone_port
-        self.drone_address = (drone_ip, drone_port)
-        self.is_imperial = is_imperial
-        self.speed = speed
+        # self.drone_address = (drone_ip, drone_port)
+        # self.is_imperial = is_imperial
+        self.speed = DEFAULT_SPEED
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind((self.host_ip, self.host_port))
 
@@ -136,6 +141,9 @@ class DroneManager(metaclass=Singleton):
         self.subs = [None] * len(self.drones)
         self.pubs = [None] * len(self.drones)
         self.pubs_draw = [None] * len(self.drones)
+        self.pubs_velocity = [None] * len(self.drones)
+        self.pubs_a = [None] * len(self.drones)
+        self.pubs_b = [None] * len(self.drones)
 
         for i in range(len(self.drones)):
             # Suscribirse al topic /optitrack/pose para recibir la posición del dron
@@ -147,6 +155,15 @@ class DroneManager(metaclass=Singleton):
 
             pub_draw = rospy.Publisher("/draw_trajectory" + str(i + 1), visualization_msgs.msg.Marker, queue_size=10)
             self.pubs_draw[i] = pub_draw
+
+            pub_velocity = rospy.Publisher("/tello_" + str(i + 1) + "/velocity", Twist, queue_size=10)
+            self.pubs_velocity[i] = pub_velocity
+
+            pub_a = rospy.Publisher("/tello_" + str(i + 1) + "/a", std_msgs.msg.Float64, queue_size=10)
+            self.pubs_a[i] = pub_a
+
+            pub_b = rospy.Publisher("/tello_" + str(i + 1) + "/b", std_msgs.msg.Float64, queue_size=10)
+            self.pubs_b[i] = pub_b
 
         
         # set mode
@@ -220,7 +237,7 @@ class DroneManager(metaclass=Singleton):
     def set_4_speed(self, lr, fb, ud, yw, idDrone):
         # Cambiar la velocidad del dron en los 4 ejes
         self.send_command(idDrone, f'rc {lr} {fb} {ud} {yw}')
-        rospy.loginfo({'action': 'set_4_speed', 'lr': lr, 'fb': fb, 'ud': ud, 'yw': yw})
+        # rospy.loginfo({'action': 'set_4_speed', 'lr': lr, 'fb': fb, 'ud': ud, 'yw': yw})
         
 
     def receive_response(self, stop_event):
@@ -287,7 +304,9 @@ class DroneManager(metaclass=Singleton):
         if is_acquire:
             with contextlib.ExitStack() as stack:
                 stack.callback(self._command_semaphore.release)
-                rospy.loginfo({'action': 'send_command', 'command': command, 'ip': drone_address})
+                # Si el comando es rc ... no se muestra
+                if not command.startswith('rc'):
+                    rospy.loginfo({'action2': 'send_command', 'command': command, 'ip': drone_address})
                 self.socket.sendto(command.encode('utf-8'), drone_address)
                 #stack.callback(self._command_semaphore.release)
 
@@ -316,10 +335,10 @@ class DroneManager(metaclass=Singleton):
 
     def move(self, direction, distance, idDrone):
         distance = float(distance)
-        if self.is_imperial:
-            distance = int(round(distance * 30.48))
-        else:
-            distance = int(round(distance * 100))
+        # if self.is_imperial:
+        #     distance = int(round(distance * 30.48))
+        # else:
+        distance = int(round(distance * 100))
         return self.send_command(idDrone, f'{direction} {distance}')
 
     def up(self, idDrone, distance=DEFAULT_DISTANCE):
@@ -351,121 +370,102 @@ class DroneManager(metaclass=Singleton):
 
     def flip(self, idDrone, direction=DEFAULT_DIRECTION):
         return self.send_command(idDrone, f'flip {direction}')
+    
 
-    # def patrol(self):
-    #     if not self.is_patrol:
-    #         self.patrol_event = threading.Event()
-    #         self._thread_patrol = threading.Thread(
-    #             target=self._patrol,
-    #             args=(self._patrol_semaphore, self.patrol_event,)
-    #         )
-    #         self._thread_patrol.start()
-    #         self.is_patrol = True
+    def draw(self, idDrone, position=None):
+        if position is None:
+            position = self.read_pose(idDrone)
 
-    # def stop_patrol(self):
-    #     if self.is_patrol:
-    #         self.patrol_event.set()
-    #         retry = 0
-    #         while self._thread_patrol.is_alive():
-    #             time.sleep(0.3)
-    #             if retry > 300:
-    #                 break
-    #             retry += 1
-    #         self.is_patrol = False
-
-    # def _patrol(self, semaphore, stop_event):
-    #     is_acquire = semaphore.acquire(blocking=False)
-    #     if is_acquire:
-    #         rospy.loginfo({'action': '_patrol', 'status': 'acquire'})
-    #         with contextlib.ExitStack() as stack:
-    #             stack.callback(semaphore.release)
-    #             status = 0
-    #             while not stop_event.is_set():
-    #                 status += 1
-    #                 if status == 1:
-    #                     self.up()
-    #                 if status == 2:
-    #                     self.clockwise(90)
-    #                 if status == 3:
-    #                     self.down()
-    #                 if status == 4:
-    #                     status = 0
-    #                 time.sleep(5)
-    #     else:
-    #         rospy.logwarn({'action': '_patrol', 'status': 'not_acquire'})
-
-    def draw_trajectory_8(self, x, y, radio, n_puntos, idDrone):
-        # Dibujar los puntos de la trayectoria en rviz (tipo visualization_msgs::Marker)
-        # x, y: posición inicial del dron
-
-        # Calcular centro de la circunferencia
-        distX = radio * np.cos(np.pi / 4)
-        distY = radio * np.sin(np.pi / 4)
-        x_c = x + distX
-        y_c = y + distY
-
-        puntos = fn.calcular_puntos_circunferencia(x_c, y_c, radio, n_puntos)
-        markers = visualization_msgs.msg.Marker()
-        markers.header.frame_id = "odom"
-        markers.header.stamp = rospy.Time.now()
-        markers.ns = "points_and_lines"
-        markers.id = 0
-        markers.type = visualization_msgs.msg.Marker.POINTS
-        markers.action = visualization_msgs.msg.Marker.ADD
-        markers.pose.orientation.w = 1.0
-        markers.scale.x = 0.03
-        markers.scale.y = 0.03
-        markers.color.a = 1.0
-        markers.color.r = 1.0
-        markers.color.g = 1.0
-        markers.color.b = 0.0
-
-        for punto in puntos:
-            p = geometry_msgs.msg.Point()
-            p.x = punto[0]
-            p.y = punto[1]
-            p.z = 0
-            markers.points.append(p)
-
-        # Calcular el otro centro del 8
-        distX = radio * np.cos(np.pi / 4)
-        distY = radio * np.sin(np.pi / 4)
-
-        puntos2 = fn.calcular_puntos_circunferencia(x + distX, y + distY, radio, n_puntos)
-        for punto in puntos2:
-            p = geometry_msgs.msg.Point()
-            p.x = punto[0]
-            p.y = punto[1]
-            p.z = 0
-            markers.points.append(p)
-        
+        markers = tr.draw_trajectory_8(position, 0.26, 4, idDrone)  
         self.pubs_draw[idDrone - 1].publish(markers)
 
-    def draw(self, idDrone):
-        self.wait_for_position(idDrone)
-        position = self.read_pose(idDrone)
-        self.draw_trajectory_8(position.pose.position.x, position.pose.position.y, 0.6, 50, 1)
+        # markers = tr.draw_trajectory_cuadrado(position, 1, 10, idDrone)
+        # self.pubs_draw[idDrone - 1].publish(markers)
+
+        # markers = tr.draw_trajectory_circulo(position, 0.5, 5, idDrone)
+        # self.pubs_draw[idDrone - 1].publish(markers)
+
+        # markers = tr.draw_trajectory_ovalo(position, 0.5, 0.3, 5, idDrone)
+        # self.pubs_draw[idDrone - 1].publish(markers)
+
+        # markers = tr.draw_trajectory_espiral(position, 0.5, 0.1, 10, idDrone)
+        # self.pubs_draw[idDrone - 1].publish(markers)
 
 
-    def start_trajectory(self, idDrone): # idDrone es el número del dron, no puede ser 0
+    def start_trajectory(self, idDrone, idTrajectory=0, version=0): # idDrone es el número del dron, no puede ser 0
         try:
             self.takeoff(idDrone)
             initial_pose = [None, None]
-            time.sleep(2) 
+            time.sleep(5) 
             rospy.loginfo("Despegado")
             self.wait_for_position(idDrone)
             initial_pose[idDrone - 1] = self.read_pose(idDrone)
-            rospy.loginfo({'action': 'start_trajectory', 'initial_pose': initial_pose[idDrone - 1], 'idDrone': idDrone})
 
+            # Cambiar signo a la orientación
+            # initial_pose[idDrone - 1].pose.orientation.z = -1 * initial_pose[idDrone - 1].pose.orientation.z
+            rospy.loginfo({'action': 'start_trajectory', 'initial_pose': initial_pose[idDrone - 1], 'idDrone': idDrone})
+            
+            # Crear fichero para log
+            f = open("log " + str(idDrone) + "-" + time.strftime("%Y%m%d-%H%M%S") + ".txt", "w")
+            
         except Exception as e:
             rospy.loginfo({'action': 'start_trajectory', 'error': str(e)})
             return
         
-        # self.zigzag(idDrone, initial_pose[idDrone - 1])
-        self.ocho(idDrone, initial_pose[idDrone - 1])
-        # self.espiral(idDrone, initial_pose, tFI)
-        # self.medirDistancia(idDrone)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
-        # self.medirGiro(idDrone)
+        if version == 0:
+            if idTrajectory == 0:
+                self.cuadrado_open_loop(idDrone, initial_pose[idDrone - 1], f)
+            elif idTrajectory == 1:
+                self.circulo_open_loop(idDrone, initial_pose[idDrone - 1], f)
+            elif idTrajectory == 2:
+                self.ovalo_open_loop(idDrone, initial_pose[idDrone - 1], f)
+            elif idTrajectory == 3:
+                self.espiral_open_loop(idDrone, initial_pose[idDrone - 1], f)
+            elif idTrajectory == 4:
+                self.ocho_open_loop(idDrone, initial_pose[idDrone - 1], f)
+        elif version == 1:
+            if idTrajectory == 0:
+                self.cuadrado_sin_recalcular(idDrone, initial_pose[idDrone - 1], f)
+            elif idTrajectory == 1:
+                self.circulo_sin_recalcular(idDrone, initial_pose[idDrone - 1], f)
+            elif idTrajectory == 2:
+                self.ovalo_sin_recalcular(idDrone, initial_pose[idDrone - 1], f)
+            elif idTrajectory == 3:
+                self.espiral_sin_recalcular(idDrone, initial_pose[idDrone - 1], f)
+            elif idTrajectory == 4:
+                self.ocho_sin_recalcular(idDrone, initial_pose[idDrone - 1], f)
+        elif version == 2:
+            if idTrajectory == 0:
+                self.cuadrado_closed_loop(idDrone, initial_pose[idDrone - 1], f)
+            elif idTrajectory == 1:
+                self.circulo_closed_loop(idDrone, initial_pose[idDrone - 1], f)
+            elif idTrajectory == 2:
+                self.ovalo_closed_loop(idDrone, initial_pose[idDrone - 1], f)
+            elif idTrajectory == 3:
+                self.espiral_closed_loop(idDrone, initial_pose[idDrone - 1], f)
+            elif idTrajectory == 4:
+                self.ocho_closed_loop(idDrone, initial_pose[idDrone - 1], f)
+    
+
+        # self.ocho_sin_recalcular(idDrone, initial_pose[idDrone - 1],f)
+        # self.ocho_open_loop(idDrone, initial_pose[idDrone - 1], f)
+        # self.ocho_closed_loop(idDrone, initial_pose[idDrone - 1], f)
+
+        # self.cuadrado_open_loop(idDrone, initial_pose[idDrone - 1], f)
+        # self.cuadrado_sin_recalcular(idDrone, initial_pose[idDrone - 1], f)
+        # self.cuadrado_closed_loop(idDrone, initial_pose[idDrone - 1], f)
+
+        # self.circulo_open_loop(idDrone, initial_pose[idDrone - 1], f)
+        # self.circulo_sin_recalcular(idDrone, initial_pose[idDrone - 1], f)
+        # self.circulo_closed_loop(idDrone, initial_pose[idDrone - 1], f)
+
+        # self.ovalo_open_loop(idDrone, initial_pose[idDrone - 1], f)
+        # self.ovalo_sin_recalcular(idDrone, initial_pose[idDrone - 1], f)
+        # self.ovalo_closed_loop(idDrone, initial_pose[idDrone - 1], f)
+
+        # self.espiral_open_loop(idDrone, initial_pose[idDrone - 1], f)
+
+        f.close()
 
         rospy.loginfo("Fin")
 
@@ -479,143 +479,65 @@ class DroneManager(metaclass=Singleton):
         self.set_4_speed(0, 0, 0, 0, idDrone)
         self.land(idDrone)
 
-    def medirDistancia(self, idDrone):
+
+    def ocho_sin_recalcular(self, idDrone, initial_pose, f):
+        rospy.loginfo({'action': 'OCHO'}) # 0.30 m/s 1.152 rad/s radio 0.26 m
+        f2 = open("log2 " + str(idDrone) + "-" + time.strftime("%Y%m%d-%H%M%S") + ".txt", "w")
+
+        if idDrone == 2:
+            self.set_4_speed(0, 0, 30, 0, idDrone)
+            time.sleep(3)
+            self.set_4_speed(0, 0, 0, 0, idDrone)
+            time.sleep(1)
+        else:
+            time.sleep(4)
+
         initial_pose = self.read_pose(idDrone)
-        self.set_4_speed(0, 10, 0, 0, idDrone)
-        time.sleep(1)
-        next_pose = self.read_pose(idDrone)
-        distancia = np.sqrt((next_pose.pose.position.x - initial_pose.pose.position.x)**2 + (next_pose.pose.position.y - initial_pose.pose.position.y)**2 + (next_pose.pose.position.z - initial_pose.pose.position.z)**2)
-        rospy.loginfo({'action': 'medirDistancia', 'distancia': distancia})
 
-    def medirGiro(self, idDrone):
-        initial_pose = self.read_pose(idDrone)
-        self.set_4_speed(0, 0, 0, 50, idDrone)
-        time.sleep(1)
-        next_pose = self.read_pose(idDrone)
-        giro = fn.norm_pi(fn.giro_to_rad(next_pose.pose.orientation.z) - fn.giro_to_rad(initial_pose.pose.orientation.z))
-        rospy.loginfo({'action': 'medirGiro', 'giro': giro})
-
-
-    def zigzag(self, idDrone, initial_pose):
-        rospy.loginfo({'action': 'ZIGZAG'})
-
-        ## zig zag
-        pasos = 3
+        ## ocho sin recalcular (con los puntos ya calculados)
         next_pose = initial_pose
-        for i in range(pasos):
-            rospy.loginfo("Paso " + str(i))
-            rospy.loginfo("Avanzar")
-            # Ir hacia delante 0.5 metros (6 s)
-            next = False
-            initial_pose = next_pose
-            primero = True
-            self.set_4_speed(0, 20, 0, 0, idDrone)
 
-            # Medir tiempo
-            t0 = rospy.Time.now().to_sec()
-            while not next:
-                next_pose = self.read_pose(idDrone)
-                
-                if next_pose is not None:
-                    # Posicion inicial respecto al mundo:
-                    tIW = fn.hom(initial_pose.pose.position.x, initial_pose.pose.position.y, initial_pose.pose.position.z, 
-                                fn.norm_pi(fn.giro_to_rad(initial_pose.pose.orientation.z)))
-                    
-                    # Posicion final respecto al dron:
-                    tFI = fn.hom(0.5, 0, 0, 0)
+        # Posicion inicial respecto al mundo:
+        tIW = fn.hom(initial_pose.pose.position.x, initial_pose.pose.position.y, initial_pose.pose.position.z, 
+                    fn.norm_pi(fn.yaw(initial_pose.pose.orientation)))
+        # f.write("Pose: " + str(fn.loc(tIW)) + "\n")
+        
+        # Puntos respecto al dron:
+        # tFI = [[0, 0.52, 0, np.pi], [0, 1.04, 0, 0], [0, 0.52, 0, np.pi], [0, 0, 0, 0]]
+        
+        # # Posiciones finales respecto al mundo:
+        # tFW = [np.dot(tIW, fn.hom(t[0], t[1], t[2], t[3])) for t in tFI]
+        # final_poses = [fn.loc(t) for t in tFW]
+        # rospy.loginfo({'action': 'start_trajectory', 'final_poses': final_poses, 'idDrone': idDrone})
 
-                    # Posicion final respecto al mundo:
-                    tFW = np.dot(tIW, tFI)
-                    final_pose = fn.loc(tFW)
+        final_poses = tr.calcular_puntos_ocho(fn.loc(tIW), 0.25, 3)
+        index = 0
+        for p in final_poses:
+            x, y, z, yaw = p
+            f.write(str(index) + str(x) + " " + str(y) + " " + str(z) + " 0 0 " + str(yaw) + " 0\n")
+            index += 1
 
-                    if primero:
-                        posefin = [final_pose[0], final_pose[1], final_pose[2], fn.rad_to_giro(fn.norm_pi(final_pose[3]))]
-                        rospy.loginfo({'action': 'start_trajectory', 'final_pose': posefin})
-                        primero = False
+        markers = tr.draw_trajectory_8(initial_pose, 0.25, 3, idDrone)   
+        self.pubs_draw[idDrone - 1].publish(markers)     
 
-                    # Comprobar si está cerca del objetivo
-                    if fn.esta_cerca(next_pose, final_pose, 0.2, 0.1):
-                        rospy.loginfo({'action': 'start_trajectory_fin', 'next_pose': next_pose})
-                        # rospy.loginfo({'action': 'start_trajectory_fin', 'final_pose': final_pose})
-                        # rospy.loginfo({'tIW': fn.loc(tIW)})
-                        # rospy.loginfo({'tFI': fn.loc(tFI)})
+        index = 0
 
-                        next = True
-                        timeDrone = rospy.Time.now().to_sec() - t0
-                        rospy.loginfo({'action': 'start_trajectory', 'time': timeDrone})
-                    elif fn.pasado(next_pose, final_pose, initial_pose):
-                        rospy.loginfo({'action': 'start_trajectory_fin2', 'next_pose': next_pose})
-                        # rospy.loginfo({'action': 'start_trajectory_fin2', 'final_pose': final_pose})
-                        # rospy.loginfo({'tIW': fn.loc(tIW)})
-                        # rospy.loginfo({'tFI': fn.loc(tFI)})
-
-                        next = True
-                        timeDrone = rospy.Time.now().to_sec() - t0
-                        rospy.loginfo({'action': 'start_trajectory', 'time': timeDrone})
-            
-            # Girar 90 grados a la izquierda o derecha (5 s 180 grados)
-            rospy.loginfo("Girar")
-            next = False
-            initial_pose = next_pose
-            primero = True
-            if i % 2 == 0:
-                self.set_4_speed(0, 0, 0, -50, idDrone)
-            else:
-                self.set_4_speed(0, 0, 0, 50, idDrone)
-
-            t0 = rospy.Time.now().to_sec()
-            while not next:
-                next_pose = self.read_pose(idDrone)
-
-                if next_pose is not None:
-                    # Posicion inicial respecto al mundo:
-                    tIW = fn.hom(initial_pose.pose.position.x, initial_pose.pose.position.y, initial_pose.pose.position.z, 
-                                 fn.norm_pi(fn.giro_to_rad(initial_pose.pose.orientation.z)))
-
-                    # Posicion final respecto al dron:
-                    if i % 2 == 0:
-                        tFI = fn.hom(0, 0, 0, np.pi / 2)
-                    else:
-                        tFI = fn.hom(0, 0, 0, -np.pi / 2)
-
-                    # Posicion final respecto al mundo:
-                    tFW = np.dot(tIW, tFI)
-                    final_pose = fn.loc(tFW)
-
-                    if primero:
-                        posefin = [final_pose[0], final_pose[1], final_pose[2], fn.rad_to_giro(fn.norm_pi(final_pose[3]))]
-                        rospy.loginfo({'action': 'start_trajectory', 'posefin': posefin})
-                        primero = False
-
-                    # Comprobar si está cerca del objetivo
-                    if fn.esta_cerca(next_pose, final_pose, 0.2, 0.05):
-                        rospy.loginfo({'action': 'start_trajectory_fin', 'next_pose': next_pose})
-                        # rospy.loginfo({'action': 'start_trajectory', 'final_pose': final_pose})
-                        # rospy.loginfo({'tIW': fn.loc(tIW)})
-                        # rospy.loginfo({'tFI': fn.loc(tFI)})
-
-                        next = True
-                        timeDrone = rospy.Time.now().to_sec() - t0
-                        rospy.loginfo({'action': 'start_trajectory', 'time': timeDrone})
-
-    def ocho(self, idDrone, initial_pose):
-        rospy.loginfo({'action': 'OCHO'})
-
-        ## ocho
-        pasos = 4
-        next_pose = initial_pose
         i = 0
         fin = False
         while not fin:
-            # Medio círculo de radio 30 cm
             rospy.loginfo("Paso " + str(i))
             next = False
             initial_pose = next_pose
-            primero = True
-            if i == 0 or i == 3:
-                self.set_4_speed(0, 30, 0, -80, idDrone) # gira a la izquierda
+            # if 0 <= i < 4 or 12 <= i <= 16:
+            if 0 <= i <= 3 or 9 < i <= 12:
+                self.set_4_speed(0, 26, 0, -80, idDrone) # gira a la izquierda
             else:
-                self.set_4_speed(0, 30, 0, 80, idDrone) # gira a la derecha # 0.80 rad/s 0.24m/s
+                self.set_4_speed(0, 20, 0, 75, idDrone) # gira a la derecha
+
+            # min_dist = fn.distancia(self.read_pose(idDrone), final_poses[i])
+            # disminuye = True
+            min_dist = 100
+            min_diff_orientation = 100
 
             # Medir tiempo
             t0 = rospy.Time.now().to_sec()
@@ -623,54 +545,103 @@ class DroneManager(metaclass=Singleton):
                 next_pose = self.read_pose(idDrone)
                 
                 if next_pose is not None:
-                    # Posicion inicial respecto al mundo:
-                    tIW = fn.hom(initial_pose.pose.position.x, initial_pose.pose.position.y, initial_pose.pose.position.z, 
-                                fn.norm_pi(fn.giro_to_rad(initial_pose.pose.orientation.z)))
-                    
-                    # Posicion final respecto al dron:
-                    if i == 0: # paso 0
-                        tFI = fn.hom(0, 0.6, 0, np.pi)
-                    elif i == 1: # paso 1
-                        tFI = fn.hom(0, -0.6, 0, np.pi)
-                    elif i == 2: # paso 2
-                        tFI = fn.hom(0, -0.6, 0, np.pi)
-                    elif i == 3: # paso 3
-                        tFI = fn.hom(0, 0.6, 0, np.pi)
-                        i = -1
-
-                    # Posicion final respecto al mundo:
-                    tFW = np.dot(tIW, tFI)
-                    final_pose = fn.loc(tFW)
-
-                    if primero:
-                        posefin = [final_pose[0], final_pose[1], final_pose[2], fn.rad_to_giro(fn.norm_pi(final_pose[3]))]
-                        rospy.loginfo({'action': 'start_trajectory', 'final_pose': posefin, 'idDrone': idDrone})
-                        primero = False
 
                     # Comprobar si está cerca del objetivo
-                    if fn.esta_cerca(next_pose, final_pose, 0.7, 0.05):
-                        rospy.loginfo({'action': 'start_trajectory_fin', 'next_pose': next_pose, 'idDrone': idDrone})
-                        # rospy.loginfo({'action': 'start_trajectory', 'final_pose': final_pose})
-                        # rospy.loginfo({'tIW': fn.loc(tIW)})
-                        # rospy.loginfo({'tFI': fn.loc(tFI)})
+                    # if fn.esta_cerca(next_pose, final_poses[i], 0.5, 0.2):
+                    #     rospy.loginfo({'action': 'start_trajectory_fin', 'next_pose': next_pose, 'idDrone': idDrone})
+                    #     next = True
+                    #     timeDrone = rospy.Time.now().to_sec() - t0
+                    #     rospy.loginfo({'action': 'start_trajectory', 'time': timeDrone, 'idDrone': idDrone})
+
+                    # aumenta, dist = fn.distancia_menor(next_pose, final_poses[i], min_dist)
+                    # if aumenta:
+                    #     # rospy.loginfo({'action': 'start_trajectory_fin', 'next_pose': next_pose, 'idDrone': idDrone, 'min_dist': min_dist})
+                    #     next = True
+                    #     timeDrone = rospy.Time.now().to_sec() - t0
+                    #     # rospy.loginfo({'action': 'start_trajectory', 'time': timeDrone, 'idDrone': idDrone})
+                    # else:
+                    #     min_dist = dist
+                    #     rospy.loginfo("Distancia: " + str(min_dist) + " hasta " + str(i))
+
+                    dist = fn.distancia(next_pose, final_poses[i])
+                    rospy.loginfo("Distancia: " + str(dist) + " hasta " + str(i))
+
+                    position = fn.loc(fn.hom(next_pose.pose.position.x, next_pose.pose.position.y, next_pose.pose.position.z, 
+                    fn.norm_pi(fn.yaw(next_pose.pose.orientation))))
+                    f2.write(str(index) + " " + str(position[0]) + " " + str(position[1]) 
+                            + " " + str(position[2]) + " 0 0 " + str(position[3]) + " 0\n")
+                    # if dist < min_dist:
+                    #     min_dist = dist
+
+                    # if dist < 0.2 or dist >= min_dist + 0.3 or fn.esta_cerca(next_pose, final_poses[i], 0.3, 0.1):
+                    #     # rospy.loginfo({'action': 'start_trajectory_fin', 'next_pose': next_pose, 'idDrone': idDrone})
+                    #     next = True
+                    #     timeDrone = rospy.Time.now().to_sec() - t0
+                    #     # rospy.loginfo({'action': 'start_trajectory', 'time': timeDrone, 'idDrone': idDrone})
+
+                    diff_orientation = fn.diff_orientation(fn.norm_pi(fn.yaw(next_pose.pose.orientation)), final_poses[i][3])
+                    rospy.loginfo("Diferencia de orientación: " + str(diff_orientation) + " paso " + str(i) + " " + str(round(final_poses[i][3], 2)) + " " + str(round(fn.norm_pi(fn.yaw(next_pose.pose.orientation)), 2)))
+                    if diff_orientation < min_diff_orientation:
+                        min_diff_orientation = diff_orientation
+
+                    if fn.esta_cerca(next_pose, final_poses[i], 0.1, 0.5) or diff_orientation < 0.1:
                         next = True
                         timeDrone = rospy.Time.now().to_sec() - t0
-                        rospy.loginfo({'action': 'start_trajectory', 'time': timeDrone, 'idDrone': idDrone})
 
-            i += 1
+            index += 1 
+            i = (i + 1) % 13
+            if i == 0:
+                fin = True
 
+        f2.close()
 
-    def espiral(self, idDrone, initial_pose, tFI):
-        rospy.loginfo({'action': 'ESPIRAL'})
+    def cuadrado_sin_recalcular(self, idDrone, initial_pose, f):
+        rospy.loginfo({'action': 'CUADRADO'}) # 0.30 m/s 1.152 rad/s radio 0.26 m
+        f2 = open("log2 " + str(idDrone) + "-" + time.strftime("%Y%m%d-%H%M%S") + ".txt", "w")
 
-        ## ocho
-        pasos = 4
-        for i in range(pasos):
-            # Ir hacia arriba, adelante y girar 180 grados
+        if idDrone == 1:
+            self.set_4_speed(0, 0, 30, 0, idDrone)
+            time.sleep(3)
+            self.set_4_speed(0, 0, 0, 0, idDrone)
+            time.sleep(1)
+        else:
+            self.set_4_speed(0, 0, 0, 0, idDrone)
+            time.sleep(3)
+
+        initial_pose = self.read_pose(idDrone)
+
+        ## ocho sin recalcular (con los puntos ya calculados)
+        next_pose = initial_pose
+
+        # Posicion inicial respecto al mundo:
+        tIW = fn.hom(initial_pose.pose.position.x, initial_pose.pose.position.y, initial_pose.pose.position.z, 
+                     fn.norm_pi(fn.yaw(initial_pose.pose.orientation)))
+        
+        # Puntos respecto al dron:
+        tFI = [[1, 0, 0, np.pi/2], [1, 1, 0, np.pi], [0, 1, 0, -np.pi/2], [0, 0, 0, 0]]
+        
+        # Posiciones finales respecto al mundo:
+        index = 0
+        tFW = [np.dot(tIW, fn.hom(t[0], t[1], t[2], t[3])) for t in tFI]
+        final_poses = [fn.loc(t) for t in tFW]
+        rospy.loginfo({'action': 'start_trajectory', 'final_poses': final_poses, 'idDrone': idDrone})
+        for p in final_poses:
+            x, y, z, yaw = p
+            f.write(str(index) + " " + str(x) + " " + str(y) + " " + str(z) + " 0 0 " + str(yaw) + " 0\n")
+            index += 1
+
+        index = 0
+        i = 0
+        fin = False
+        while not fin:
+            rospy.loginfo("Paso " + str(i))
             next = False
-            initial_pose = self.read_pose(idDrone)
-            primero = True
-            self.set_4_speed(0, 30, 15, 80, idDrone) # gira a la derecha
+            initial_pose = next_pose
+            self.set_4_speed(0, 20, 0, 0, idDrone) # avanza
+
+            # min_dist = fn.distancia(self.read_pose(idDrone), final_poses[i])
+            # disminuye = True
+            min_dist = 100
 
             # Medir tiempo
             t0 = rospy.Time.now().to_sec()
@@ -678,202 +649,954 @@ class DroneManager(metaclass=Singleton):
                 next_pose = self.read_pose(idDrone)
                 
                 if next_pose is not None:
-                    # Posicion inicial respecto al mundo:
-                    tIW = fn.hom(initial_pose.pose.position.x, initial_pose.pose.position.y, initial_pose.pose.position.z, 
-                                fn.norm_pi(fn.giro_to_rad(initial_pose.pose.orientation.z)))
-                    
-                    # Posicion final respecto al dron:
-                    tFI = fn.hom(0.6, 0, 0.3, -np.pi)
+                    dist = fn.distancia(next_pose, final_poses[i])
+                    # rospy.loginfo("Distancia: " + str(dist) + " hasta " + str(final_poses[i]))
+                    position = fn.loc(fn.hom(next_pose.pose.position.x, next_pose.pose.position.y, next_pose.pose.position.z, 
+                    fn.norm_pi(fn.yaw(next_pose.pose.orientation))))
+                    f2.write(str(index) + " " + str(position[0]) + " " + str(position[1]) 
+                            + " " + str(position[2]) + " 0 0 " + str(position[3]) + " 0\n")
+                    if dist < min_dist:
+                        min_dist = dist
 
-                    # Posicion final respecto al mundo:
-                    tFW = np.dot(tIW, tFI)
-                    final_pose = fn.loc(tFW)
-
-                    if primero:
-                        posefin = [final_pose[0], final_pose[1], final_pose[2], fn.rad_to_giro(fn.norm_pi(final_pose[3]))]
-                        rospy.loginfo({'action': 'start_trajectory', 'final_pose': posefin})
-                        primero = False
-
-                    # Comprobar si está cerca del objetivo
-                    if fn.esta_cerca(next_pose, final_pose, 0.5, 0.1):
-                        rospy.loginfo({'action': 'start_trajectory', 'next_pose': next_pose})
-                        rospy.loginfo({'action': 'start_trajectory', 'final_pose': final_pose})
-                        rospy.loginfo({'tIW': fn.loc(tIW)})
-                        rospy.loginfo({'tFI': fn.loc(tFI)})
+                    if dist < 0.2 or dist >= min_dist + 0.1 or fn.esta_cerca(next_pose, final_poses[i], 0.2, 0.5):
+                        # rospy.loginfo({'action': 'start_trajectory_fin', 'next_pose': next_pose, 'idDrone': idDrone})
                         next = True
                         timeDrone = rospy.Time.now().to_sec() - t0
-                        rospy.loginfo({'action': 'start_trajectory', 'time': timeDrone})
+                        self.set_4_speed(0, 0, 0, 0, idDrone)
+                        time.sleep(1)
+                        # rospy.loginfo({'action': 'start_trajectory', 'time': timeDrone, 'idDrone': idDrone})
+
+            self.set_4_speed(0, 0, 0, -50, idDrone)
+
+            t0 = rospy.Time.now().to_sec()
+            next = False
+            min_diff_orientation = 100
+            while not next:
+                next_pose = self.read_pose(idDrone)
+                
+                if next_pose is not None:
+
+                    position = fn.loc(fn.hom(next_pose.pose.position.x, next_pose.pose.position.y, next_pose.pose.position.z, 
+                    fn.norm_pi(fn.yaw(next_pose.pose.orientation))))
+                    f2.write(str(index) + " " + str(position[0]) + " " + str(position[1]) 
+                            + " " + str(position[2]) + " 0 0 " + str(position[3]) + " 0\n")
+
+                    diff_orientation = fn.diff_orientation(abs(fn.norm_pi(fn.yaw(next_pose.pose.orientation))), abs(final_poses[i][3]))
+                    rospy.loginfo("Diferencia de orientación: " + str(diff_orientation) + " paso " + str(i) + " " + str(round(final_poses[i][3], 2)) + " " + str(round(fn.norm_pi(fn.yaw(next_pose.pose.orientation)), 2)))
+                    if diff_orientation < min_diff_orientation:
+                        min_diff_orientation = diff_orientation
+
+                    if diff_orientation < 0.001 or diff_orientation >= min_diff_orientation + 0.05:
+                        next = True
+                        timeDrone = rospy.Time.now().to_sec() - t0
+                        # self.set_4_speed(0, 0, 0, 0, idDrone)
+                        # time.sleep(1)
+
+                    # if fn.esta_cerca(next_pose, final_poses[i], 0.5, 0.01):
+                    #     # rospy.loginfo({'action': 'start_trajectory_fin', 'next_pose': next_pose, 'idDrone': idDrone})
+                    #     # rospy.loginfo({'final': final_poses[i]})
+                    #     next = True
+                    #     timeDrone = rospy.Time.now().to_sec() - t0
+                    #     # rospy.loginfo({'action': 'start_trajectory', 'time': timeDrone, 'idDrone': idDrone})
+            
+            index += 1
+            i = (i + 1) % 4
+            if i == 0:
+                fin = True
+                print(next_pose)
+
+        f2.close()
+
+    def circulo_sin_recalcular(self, idDrone, initial_pose, f):
+        rospy.loginfo({'action': 'CIRCULO'})
+        f2 = open("log2 " + str(idDrone) + "-" + time.strftime("%Y%m%d-%H%M%S") + ".txt", "w")
+
+        # if idDrone == 1:
+        #     self.set_4_speed(0, 0, 30, 0, idDrone)
+        #     time.sleep(3)
+        #     self.set_4_speed(0, 0, 0, 0, idDrone)
+        #     time.sleep(1)
+        # else:
+        #     self.set_4_speed(0, 0, 0, 0, idDrone)
+        #     time.sleep(3)
+
+        # initial_pose = self.read_pose(idDrone)
+
+        ## circulo sin recalcular (con los puntos ya calculados)
+        next_pose = initial_pose
+
+        # Posicion inicial respecto al mundo:
+        tIW = fn.hom(initial_pose.pose.position.x, initial_pose.pose.position.y, initial_pose.pose.position.z,
+                    fn.norm_pi(fn.yaw(initial_pose.pose.orientation)))
+        
+        # # Puntos respecto al dron:
+        # tFI = [[0.25, 0.25, 0, np.pi/4],[0.5, 0.5, 0, np.pi/2], [0.75, 0.25, 0, np.pi/2 + np.pi/4],
+        #        [0, 1, 0, np.pi], [-0.25, 0.75, 0, -np.pi + np.pi/4],[-0.5, 0.5, 0, -np.pi/2], 
+        #        [-0.25, 0.25, 0, -np.pi/4],[0, 0, 0, 0]]
+
+        # # Posiciones finales respecto al mundo:
+        # index = 0
+        # tFW = [np.dot(tIW, fn.hom(t[0], t[1], t[2], t[3])) for t in tFI]
+        # final_poses = [fn.loc(t) for t in tFW]
+
+        index = 0
+        final_poses = tr.calcular_puntos_circulo(fn.loc(tIW), 0.5, 4)
+        rospy.loginfo({'action': 'start_trajectory', 'final_poses': final_poses, 'idDrone': idDrone})
+        for p in final_poses:
+            x, y, z, yaw = p
+            f.write(str(index) + " " + str(x) + " " + str(y) + " " + str(z) + " 0 0 " + str(yaw) + " 0\n")
+            index += 1
+
+        markers = tr.draw_trajectory_circulo(initial_pose, 0.5, 4, idDrone)
+        self.pubs_draw[idDrone - 1].publish(markers)
+
+        index = 0
+        i = 0
+        fin = False
+        while not fin:
+            rospy.loginfo("Paso " + str(i))
+            next = False
+            initial_pose = next_pose
+            self.set_4_speed(0, 25, 0, -46, idDrone) 
+
+            # min_dist = fn.distancia(self.read_pose(idDrone), final_poses[i])
+            # disminuye = True
+            min_diff_orientation = 100
+
+            # Medir tiempo
+            t0 = rospy.Time.now().to_sec()
+            while not next:
+                next_pose = self.read_pose(idDrone)
+                
+                if next_pose is not None:
+                    position = fn.loc(fn.hom(next_pose.pose.position.x, next_pose.pose.position.y, next_pose.pose.position.z, 
+                    fn.norm_pi(fn.yaw(next_pose.pose.orientation))))
+                    f2.write(str(index) + " " + str(position[0]) + " " + str(position[1]) 
+                            + " " + str(position[2]) + " 0 0 " + str(position[3]) + " 0\n")
+                    
+                    diff_orientation = fn.diff_orientation(abs(fn.norm_pi(fn.yaw(next_pose.pose.orientation))), abs(final_poses[i][3]))
+                    rospy.loginfo("Diferencia de orientación: " + str(diff_orientation) + " paso " + str(i) + " " + str(round(final_poses[i][3], 2)) + " " + str(round(fn.norm_pi(fn.yaw(next_pose.pose.orientation)), 2)))
+                    if diff_orientation < min_diff_orientation:
+                        min_diff_orientation = diff_orientation
+
+                    if diff_orientation < 0.001 or diff_orientation >= min_diff_orientation + 0.05 or fn.esta_cerca(next_pose, final_poses[i], 0.2, 0.1):
+                        next = True
+                        timeDrone = rospy.Time.now().to_sec() - t0
+
+            index += 1
+            i = (i + 1) % 9
+            if i == 0:
+                fin = True
+
+        f2.close()
+
     
+    def ovalo_sin_recalcular(self, idDrone, initial_pose, f):
+        rospy.loginfo({'action': 'OVALO'})
+        f2 = open("log2 " + str(idDrone) + "-" + time.strftime("%Y%m%d-%H%M%S") + ".txt", "w")
+
+        ## ovalo sin recalcular (con los puntos ya calculados)
+        next_pose = initial_pose
+
+        # Posicion inicial respecto al mundo:
+        tIW = fn.hom(initial_pose.pose.position.x, initial_pose.pose.position.y, initial_pose.pose.position.z,
+                    fn.norm_pi(fn.yaw(initial_pose.pose.orientation)))
+        
+        # # Puntos respecto al dron:
+        # tFI = [[1, 0, 0, 0], [1.5, 0.5, 0, np.pi/2], [1, 1, 0, np.pi], [0, 1, 0, np.pi], [-0.5, 0.5, 0, -np.pi/2], [0, 0, 0, 0]]
+
+        # # Posiciones finales respecto al mundo:
+        # index = 0
+        # tFW = [np.dot(tIW, fn.hom(t[0], t[1], t[2], t[3])) for t in tFI]
+        # final_poses = [fn.loc(t) for t in tFW]
+
+        index = 0
+        final_poses = tr.calcular_puntos_ovalo(fn.loc(tIW), 1, 0.5, 5)
+        rospy.loginfo({'action': 'start_trajectory', 'final_poses': final_poses, 'idDrone': idDrone})
+        for p in final_poses:
+            x, y, z, yaw = p
+            f.write(str(index) + " " + str(x) + " " + str(y) + " " + str(z) + " 0 0 " + str(yaw) + " 0\n")
+            index += 1
+
+        markers = tr.draw_trajectory_ovalo(initial_pose, 1, 0.5, 5, idDrone)
+        self.pubs_draw[idDrone - 1].publish(markers)
+
+        index = 0
+        i = 0
+        fin = False
+        while not fin:
+            rospy.loginfo("Paso " + str(i))
+            # if i == 0 or i == 1 or i == 2 or i == 7 or i == 8 or i == 9: # Avanza en línea recta
+            if 0 <= i <= 3 or 12 <= i <= 14: # Avanza en línea recta
+                next = False
+                initial_pose = next_pose
+                self.set_4_speed(0, 25, 0, 0, idDrone)
+
+                min_dist = 100
+
+                # Medir tiempo
+                t0 = rospy.Time.now().to_sec()
+                while not next:
+                    next_pose = self.read_pose(idDrone)
+                    
+                    if next_pose is not None:
+                        dist = fn.distancia(next_pose, final_poses[i])
+                        # rospy.loginfo("Distancia: " + str(dist) + " hasta " + str(final_poses[i]))
+                        position = fn.loc(fn.hom(next_pose.pose.position.x, next_pose.pose.position.y, next_pose.pose.position.z, 
+                        fn.norm_pi(fn.yaw(next_pose.pose.orientation))))
+                        f2.write(str(index) + " " + str(position[0]) + " " + str(position[1]) 
+                                + " " + str(position[2]) + " 0 0 " + str(position[3]) + " 0\n")
+                        if dist < min_dist:
+                            min_dist = dist
+
+                        if dist < 0.01 or dist >= min_dist + 0.1 or fn.esta_cerca(next_pose, final_poses[i], 0.05, 0.1):
+                            # rospy.loginfo({'action': 'start_trajectory_fin', 'next_pose': next_pose, 'idDrone': idDrone})
+                            next = True
+                            timeDrone = rospy.Time.now().to_sec() - t0
+                            # rospy.loginfo({'action': 'start_trajectory', 'time': timeDrone, 'idDrone': idDrone})
+            
+            else: # Gira
+                next = False
+                initial_pose = next_pose
+                self.set_4_speed(0, 25, 0, -47, idDrone)
+
+                min_diff_orientation = 100
+
+                # Medir tiempo
+                t0 = rospy.Time.now().to_sec()
+                while not next:
+                    next_pose = self.read_pose(idDrone)
+                    
+                    if next_pose is not None:
+                        position = fn.loc(fn.hom(next_pose.pose.position.x, next_pose.pose.position.y, next_pose.pose.position.z, 
+                        fn.norm_pi(fn.yaw(next_pose.pose.orientation))))
+                        f2.write(str(index) + " " + str(position[0]) + " " + str(position[1]) 
+                                + " " + str(position[2]) + " 0 0 " + str(position[3]) + " 0\n")
+
+                        diff_orientation = fn.diff_orientation(abs(fn.norm_pi(fn.yaw(next_pose.pose.orientation))), abs(final_poses[i][3]))
+                        # rospy.loginfo("Diferencia de orientación: " + str(diff_orientation) + " paso " + str(i) + " " + str(round(final_poses[i][3], 2)) + " " + str(round(fn.norm_pi(fn.yaw(next_pose.pose.orientation)), 2)))
+                        if diff_orientation < min_diff_orientation:
+                            min_diff_orientation = diff_orientation
+
+                        if diff_orientation < 0.001 or diff_orientation >= min_diff_orientation + 0.1 or fn.esta_cerca(next_pose, final_poses[i], 0.2, 0.1):
+                            next = True
+                            timeDrone = rospy.Time.now().to_sec() - t0
+
+            index += 1
+            i = (i + 1) % 22
+            if i == 0:
+                fin = True
+
+        f2.close()
+
+    def espiral_sin_recalcular(self, idDrone, initial_pose, f):
+        rospy.loginfo({'action': 'ESPIRAL'})
+        f2 = open("log2 " + str(idDrone) + "-" + time.strftime("%Y%m%d-%H%M%S") + ".txt", "w")
+
+        if idDrone == 1:
+            self.set_4_speed(0, 0, 30, 0, idDrone)
+            time.sleep(3)
+            self.set_4_speed(0, 0, 0, 0, idDrone)
+            time.sleep(1)
+        else:
+            self.set_4_speed(0, 0, 10, 0, idDrone)
+            time.sleep(1)
+            self.set_4_speed(0, 0, 0, 0, idDrone)
+            time.sleep(3)
 
 
-    # def receive_video(self, stop_event, pipe_in, host_ip, video_port):
-    #     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock_video:
-    #         sock_video.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    #         sock_video.settimeout(.5)
-    #         v = sock_video.bind((host_ip, video_port))
-    #         data = bytearray(2048)
-    #         while not stop_event.is_set():
-    #             try:
-    #                 size, addr = sock_video.recvfrom_into(data)
-    #                 # logger.info({'action': 'receive_video', 'data': data})
-    #                 # <node pkg="tf" type="static_transform_publisher" name="broadcaster_odom" args="$0 0 0 1.57 0 3.14 odom odom_ned 100" />
-    #             except socket.timeout as ex:
-    #                 logger.warning({'action': 'receive_video', 'ex': ex, 'port': video_port, 'host_ip': host_ip})
-    #                 rospy.loginfo({'action': 'receive_video_wr', 'ex': ex})
-    #                 time.sleep(0.5)
-    #                 continue
-    #             except socket.error as ex:
-    #                 logger.error({'action': 'receive_video', 'ex': ex})
-    #                 rospy.loginfo({'action': 'receive_video_err', 'ex': ex})
-    #                 break
+        initial_pose = self.read_pose(idDrone)
 
-    #             try:
-    #                 pipe_in.write(data[:size])
-    #                 pipe_in.flush()
-    #             except Exception as ex:
-    #                 logger.error({'action': 'receive_video', 'ex': ex})
-    #                 rospy.loginfo({'action': 'receive_video_err2', 'ex': ex})
-    #                 break
+        ## circulo sin recalcular (con los puntos ya calculados)
+        next_pose = initial_pose
 
-    # def video_binary_generator(self):
-    #     while True:
-    #         try:
-    #             frame = self.proc_stdout.read(FRAME_SIZE)
-    #         except Exception as ex:
-    #             logger.error({'action': 'video_binary_generator', 'ex': ex})
-    #             continue
+        # Posicion inicial respecto al mundo:
+        tIW = fn.hom(initial_pose.pose.position.x, initial_pose.pose.position.y, initial_pose.pose.position.z,
+                    fn.norm_pi(fn.yaw(initial_pose.pose.orientation)))
 
-    #         if not frame:
-    #             continue
+        index = 0
+        final_poses = tr.calcular_puntos_espiral(fn.loc(tIW), 0.5, 0.05, 5)
+        rospy.loginfo({'action': 'start_trajectory', 'final_poses': final_poses, 'idDrone': idDrone})
+        for p in final_poses:
+            x, y, z, yaw = p
+            f.write(str(index) + " " + str(x) + " " + str(y) + " " + str(z) + " 0 0 " + str(yaw) + " 0\n")
+            index += 1
 
-    #         frame = np.fromstring(frame, np.uint8).reshape(FRAME_Y, FRAME_X, 3)
-    #         yield frame
+        markers = tr.draw_trajectory_espiral(initial_pose, 0.5, 0.05, 5, idDrone)
+        self.pubs_draw[idDrone - 1].publish(markers)
 
-    # def enable_face_detect(self):
-    #     self._is_enable_face_detect = True
+        index = 0
+        i = 0
+        fin = False
+        while not fin:
+            rospy.loginfo("Paso " + str(i))
+            next = False
+            initial_pose = next_pose
+            self.set_4_speed(0, 24, 15, -47, idDrone) 
 
-    # def disable_face_detect(self):
-    #     self._is_enable_face_detect = False
+            # min_dist = fn.distancia(self.read_pose(idDrone), final_poses[i])
+            # disminuye = True
+            min_diff_orientation = 100
 
-    # def video_jpeg_generator(self):
-    #     for frame in self.video_binary_generator():
-    #         if self._is_enable_face_detect:
-    #             if self.is_patrol:
-    #                 self.stop_patrol()
+            # Medir tiempo
+            t0 = rospy.Time.now().to_sec()
+            while not next:
+                next_pose = self.read_pose(idDrone)
+                
+                if next_pose is not None:
+                    position = fn.loc(fn.hom(next_pose.pose.position.x, next_pose.pose.position.y, next_pose.pose.position.z, 
+                    fn.norm_pi(fn.yaw(next_pose.pose.orientation))))
+                    f2.write(str(index) + " " + str(position[0]) + " " + str(position[1]) 
+                            + " " + str(position[2]) + " 0 0 " + str(position[3]) + " 0\n")
+                    
+                    diff_orientation = fn.diff_orientation(abs(fn.norm_pi(fn.yaw(next_pose.pose.orientation))), abs(final_poses[i][3]))
+                    rospy.loginfo("Diferencia de orientación: " + str(diff_orientation) + " paso " + str(i) + " " + str(round(final_poses[i][3], 2)) + " " + str(round(fn.norm_pi(fn.yaw(next_pose.pose.orientation)), 2)))
+                    if diff_orientation < min_diff_orientation:
+                        min_diff_orientation = diff_orientation
 
-    #             gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-    #             faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
-    #             for (x, y, w, h) in faces:
-    #                 cv.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
+                    if diff_orientation < 0.001 or diff_orientation >= min_diff_orientation + 0.05 or fn.esta_cerca(next_pose, final_poses[i], 0.2, 0.5):
+                        next = True
+                        timeDrone = rospy.Time.now().to_sec() - t0
 
-    #                 face_center_x = x + (w / 2)
-    #                 face_center_y = y + (h / 2)
-    #                 diff_x = FRAME_CENTER_X - face_center_x
-    #                 diff_y = FRAME_CENTER_Y - face_center_y
-    #                 face_area = w * h
-    #                 percent_face = face_area / FRAME_AREA
+            index += 1
+            i = (i + 1) % 22
+            if i == 0:
+                fin = True
 
-    #                 drone_x, drone_y, drone_z, speed = 0, 0, 0, self.speed
-    #                 if diff_x < -30:
-    #                     drone_y = -30
-    #                 if diff_x > 30:
-    #                     drone_y = 30
-    #                 if diff_y < -15:
-    #                     drone_z = -30
-    #                 if diff_y > 15:
-    #                     drone_z = 30
-    #                 if percent_face > 0.30:
-    #                     drone_x = -30
-    #                 if percent_face < 0.02:
-    #                     drone_x = 30
-    #                 self.send_command(f'go {drone_x} {drone_y} {drone_z} {speed}',
-    #                                   blocking=False)
-    #                 break
+        f2.close()
 
-    #         _, jpeg = cv.imencode('.jpg', frame)
-    #         jpeg_binary = jpeg.tobytes()
 
-    #         if self.is_video:
-    #             # logger.info({'action': 'write_frame', 'frame': or_frame})
-    #             self.video_out.write(frame)
+    def ocho_open_loop(self, idDrone, initial_pose, f):
+        rospy.loginfo({'action': 'OCHO'})
+        f2 = open("log2 " + str(idDrone) + "-" + time.strftime("%Y%m%d-%H%M%S") + ".txt", "w")
+        if idDrone == 1:
+            self.set_4_speed(0, 0, 40, 0, idDrone)
+            time.sleep(3)
+            self.set_4_speed(0, 0, 0, 0, idDrone)
+            time.sleep(1)
+        else:
+            self.set_4_speed(0, 0, 10, 0, idDrone)
+            time.sleep(3)
+            self.set_4_speed(0, 0, 0, 0, idDrone)
+            time.sleep(1)
 
-    #         if self.take_frames:
-    #             backup_file = "frame" + str(self.numFrame) + '.jpg'
-    #             file_path = os.path.join(
-    #                 self.folder, backup_file
-    #             )
-    #             current_time = time.time()
-    #             dif_time = current_time - self.frame_time
-    #             self.frame_time = current_time
-    #             with open(file_path, 'wb') as f:
-    #                 f.write(jpeg_binary)
-    #             self.frame_total_time += dif_time
-    #             fichero = open(self.file_frames, 'a')
-    #             fichero.write("Tiempo frame  " + str(self.numFrame) + ": " + str(dif_time) + "\n")
-    #             fichero.close()
-    #             self.numFrame += 1
+        initial_pose = self.read_pose(idDrone)
 
-    #         if self.is_snapshot:
-    #             backup_file = time.strftime("%Y%m%d-%H%M%S") + '.jpg'
-    #             snapshot_file = 'snapshot.jpg'
-    #             for filename in (backup_file, snapshot_file):
-    #                 file_path = os.path.join(
-    #                     SNAPSHOTS_IMAGE_FOLDER, filename
-    #                 )
-    #                 with open(file_path, 'wb') as f:
-    #                     f.write(jpeg_binary)
-    #             self.is_snapshot = False
+        # Posicion inicial respecto al mundo:
+        tIW = fn.hom(initial_pose.pose.position.x, initial_pose.pose.position.y, initial_pose.pose.position.z, 
+                    fn.norm_pi(fn.yaw(initial_pose.pose.orientation)))
+        
+        pts = tr.calcular_puntos_ocho(fn.loc(tIW), 0.26, 4)
+        index = 0
+        for p in pts:
+            # rospy.loginfo({'action': 'start_trajectory', 'pose': p})
+            f.write(str(index) + " " + str(p[0]) + " " + str(p[1]) 
+                    + " " + str(p[2]) + " 0 0 " + str(p[3]) + " 0\n")
+            index += 1
+        # t_delay = 1.2
+        index = 0
 
-    #         yield jpeg_binary
+        markers = tr.draw_trajectory_8(initial_pose, 0.26, 4, idDrone)
+        self.pubs_draw[idDrone - 1].publish(markers)
 
-    # def snapshot(self):
-    #     self.is_snapshot = True
-    #     retry = 0
-    #     while retry < 3:
-    #         if not self.is_snapshot:
-    #             return True
-    #         time.sleep(0.1)
-    #         retry += 1
-    #     return False
+        # ocho calculando el tiempo según la velocidad lineal y angular
+        v = 0.30 # 0.30 m/s
+        w = 1.152 # 1.152 rad/s
+        r = v / w
 
-    # def takeVideo(self):
-    #     if not self.is_video:
-    #         backup_file = time.strftime("%Y%m%d-%H%M%S") + '.avi'
-    #         file_path = os.path.join(
-    #             VIDEOS_IMAGE_FOLDER, backup_file
-    #         )
-    #         self.video_out = cv.VideoWriter(file_path,
-    #                                         cv.VideoWriter_fourcc('M', 'J', 'P', 'G'),
-    #                                         30.0, (FRAME_X, FRAME_Y))
-    #         self.ini_video = time.time()
-    #         self.is_video = True
-    #         logger.info({'action': 'take_video'})
+        # Tiempo para hacer media circunferencia
+        t = np.pi * r / v # - t_delay
+        rospy.loginfo({'tiempo': t})
 
-    # def stopVideo(self):
-    #     logger.info({'action': 'stop_video'})
-    #     self.is_video = False
-    #     self.video_out.release()
-    #     self.fin_video = time.time()
-    #     tiempo = self.fin_video - self.ini_video
-    #     logger.info({'Tiempo tomar video': tiempo})
+        t_2 = t / 4
 
-    # def takeFrames(self):
-    #     self.dir_frames = 'frames' + time.strftime("%Y%m%d-%H%M%S")
-    #     self.numFrame = 0
-    #     self.folder = FRAMES_IMAGE_FOLDER + self.dir_frames
-    #     os.mkdir(self.folder)
-    #     self.file_frames = FRAMES_IMAGE_FOLDER + self.dir_frames + "times.txt"
-    #     fichero = open(self.file_frames, 'w')
-    #     fichero.close()
-    #     self.frame_time = time.time()
-    #     self.frame_total_time = 0
-    #     self.take_frames = True
+        # Cuando pase el tiempo, siguiente paso
+        i = 0
+        fin = False
+        while not fin:
+            rospy.loginfo("Paso " + str(i))
+            next = False
+            if i == 0 or i == 3:
+                self.set_4_speed(0, v * 100 / 1.20, 0, -w * 100 / 1.44, idDrone) # gira a la izquierda
+                # rospy.loginfo("Gira a la izquierda")
+            else:
+                self.set_4_speed(0, v * 100 / 1.20, 0, w * 100 / 1.44, idDrone) # gira a la derecha
+                # rospy.loginfo("Gira a la derecha")
 
-    # def stopFrames(self):
-    #     self.stop_frames = False
-    #     med_time = self.frame_total_time / float(self.numFrame)
-    #     fichero = open(self.file_frames, 'a')
-    #     fichero.write("Tiempo medio por frame: " + str(med_time) + '\n')
-    #     fichero.close()
+            # Medir tiempo
+            t0 = rospy.Time.now().to_sec()
+            j = 1
+            while not next:
+                timeDrone = rospy.Time.now().to_sec() - t0
+                
+                if timeDrone >= t:
+                    rospy.loginfo({'action': 'start_trajectory', 'time': timeDrone})
+                    next = True
+                elif timeDrone >= t_2 * j:
+                    index += 1
+                    j += 1
 
+                pose = self.read_pose(idDrone)
+                position = fn.loc(fn.hom(pose.pose.position.x, pose.pose.position.y, pose.pose.position.z, 
+                    fn.norm_pi(fn.yaw(pose.pose.orientation))))
+                f2.write(str(index) + " " + str(position[0]) + " " + str(position[1]) 
+                    + " " + str(position[2]) + " 0 0 " + str(position[3]) + " 0\n")
+
+            index += 1
+            i = (i + 1) % 4
+            if i == 0:
+                fin = True
+
+    def cuadrado_open_loop(self, idDrone, initial_pose, f):
+        rospy.loginfo({'action': 'CUADRADO'})
+        f2 = open("log2 " + str(idDrone) + "-" + time.strftime("%Y%m%d-%H%M%S") + ".txt", "w")
+        # if idDrone == 1:
+        #     self.set_4_speed(0, 0, 30, 0, idDrone)
+        #     time.sleep(3)
+        #     self.set_4_speed(0, 0, 0, 0, idDrone)
+        #     time.sleep(1)
+        # else:
+        #     time.sleep(4)
+
+        if idDrone == 1:
+            self.set_4_speed(0, 0, 30, 0, idDrone)
+            time.sleep(3)
+            self.set_4_speed(0, 0, 0, 0, idDrone)
+            time.sleep(1)
+        else:
+            self.set_4_speed(0, 0, 10, 0, idDrone)
+            time.sleep(1)
+            self.set_4_speed(0, 0, 0, 0, idDrone)
+            time.sleep(3)
+
+        num_puntos = 10
+        initial_pose = self.read_pose(idDrone)
+
+        # Posicion inicial respecto al mundo:
+        tIW = fn.hom(initial_pose.pose.position.x, initial_pose.pose.position.y, initial_pose.pose.position.z, 
+                    fn.norm_pi(fn.yaw(initial_pose.pose.orientation)))
+        
+        pts = tr.calcular_puntos_cuadrado(fn.loc(tIW), 1, 10)
+        index = 0
+        for p in pts:
+            f.write(str(index) + " " + str(p[0]) + " " + str(p[1]) 
+                    + " " + str(p[2]) + " 0 0 " + str(p[3]) + " 0\n")
+            index += 1
+
+        markers = tr.draw_trajectory_cuadrado(initial_pose, 1, 10, idDrone)
+        self.pubs_draw[idDrone - 1].publish(markers)
+
+        # Cuadrado calculando el tiempo según la velocidad lineal y angular
+        v = 0.30 # 0.30 m/s     0.25 = 0.30 m/s  1 = 1.20 m/s
+        w = 1.152 # 1.152 rad/s
+        m = 1
+        
+        # Tiempo para hacer un lado
+        t = m / v # - t_delay
+        rospy.loginfo({'tiempo': t})
+
+        t_log = t / num_puntos
+
+        # Tiempo para girar 90 grados
+        t2 = np.pi / 2 / w 
+        rospy.loginfo({'tiempo2': t2})
+    
+        index = 0
+
+        # Cuando pase el tiempo, siguiente paso
+        i = 0
+        fin = False
+        while not fin:
+            rospy.loginfo("Paso " + str(i))
+            next = False
+            self.set_4_speed(0, v * 100 / 1.20, 0, 0, idDrone) # avanza recto
+
+            # Medir tiempo
+            t0 = rospy.Time.now().to_sec()
+            j = 1
+            while not next:
+                timeDrone = rospy.Time.now().to_sec() - t0
+                if timeDrone >= t:
+                    rospy.loginfo({'action': 'start_trajectory', 'time': timeDrone})
+                    next = True
+                elif timeDrone >= t_log * j:
+                    index += 1
+                    j += 1
+                pose = self.read_pose(idDrone)
+                position = fn.loc(fn.hom(pose.pose.position.x, pose.pose.position.y, pose.pose.position.z, 
+                    fn.norm_pi(fn.yaw(pose.pose.orientation))))
+                f2.write(str(index) + " " + str(position[0]) + " " + str(position[1]) 
+                    + " " + str(position[2]) + " 0 0 " + str(position[3]) + " 0\n")
+                
+            self.set_4_speed(0, 0, 0, -w * 100 / 1.44, idDrone) # gira a la izquierda
+
+            # Medir tiempo
+            t0 = rospy.Time.now().to_sec()
+            next = False
+            while not next:
+                timeDrone = rospy.Time.now().to_sec() - t0
+                if timeDrone >= t2:
+                    rospy.loginfo({'action': 'start_trajectory', 'time': timeDrone})
+                    next = True
+                pose = self.read_pose(idDrone)
+                position = fn.loc(fn.hom(pose.pose.position.x, pose.pose.position.y, pose.pose.position.z, 
+                    fn.norm_pi(fn.yaw(pose.pose.orientation))))
+                f2.write(str(index) + " " + str(position[0]) + " " + str(position[1]) 
+                    + " " + str(position[2]) + " 0 0 " + str(position[3]) + " 0\n")
+
+            # index += 1
+            i = (i + 1) % 4
+            if i == 0:
+                fin = True
+
+    def circulo_open_loop(self, idDrone, initial_pose, f):
+        rospy.loginfo({'action': 'CIRCULO'})
+        f2 = open("log2 " + str(idDrone) + "-" + time.strftime("%Y%m%d-%H%M%S") + ".txt", "w")
+        # if idDrone == 1:
+        #     self.set_4_speed(0, 0, 30, 0, idDrone)
+        #     time.sleep(3)
+        #     self.set_4_speed(0, 0, 0, 0, idDrone)
+        #     time.sleep(1)
+        # else:
+        #     time.sleep(4)
+
+        initial_pose = self.read_pose(idDrone)
+
+        # Posicion inicial respecto al mundo:
+        tIW = fn.hom(initial_pose.pose.position.x, initial_pose.pose.position.y, initial_pose.pose.position.z,
+                    fn.norm_pi(fn.yaw(initial_pose.pose.orientation)))
+        
+        pts = tr.calcular_puntos_circulo(fn.loc(tIW), 0.5, 10)
+        index = 0
+        for p in pts:
+            f.write(str(index) + " " + str(p[0]) + " " + str(p[1]) 
+                    + " " + str(p[2]) + " 0 0 " + str(p[3]) + " 0\n")
+            index += 1
+        index = 0
+
+        markers = tr.draw_trajectory_circulo(initial_pose, 0.5, 10, idDrone)
+        self.pubs_draw[idDrone - 1].publish(markers)
+
+        # Circulo calculando el tiempo según la velocidad lineal y angular
+        v = 0.30
+        w = 0.60
+        r = v / w
+
+        # Tiempo para hacer una circunferencia
+        t = 2 * np.pi * r / v
+        rospy.loginfo({'tiempo': t})
+
+        t_2 = t / 20 # Cada t_2 segundos se guarda un punto
+
+        i = 0
+        fin = False
+        while not fin:
+            rospy.loginfo("Paso " + str(i))
+            next = False
+            self.set_4_speed(0, v * 100 / 1.20 , 0, -w * 100 / 1.30, idDrone) # avanza
+
+            # Medir tiempo
+            t0 = rospy.Time.now().to_sec()
+            j = 0
+            while not next:
+                timeDrone = rospy.Time.now().to_sec() - t0
+                pose = self.read_pose(idDrone)
+                position = fn.loc(fn.hom(pose.pose.position.x, pose.pose.position.y, pose.pose.position.z, 
+                    fn.norm_pi(fn.yaw(pose.pose.orientation))))
+                f2.write(str(index) + " " + str(position[0]) + " " + str(position[1]) 
+                    + " " + str(position[2]) + " 0 0 " + str(position[3]) + " 0\n")
+                if timeDrone >= t:
+                    rospy.loginfo({'action': 'start_trajectory', 'time': timeDrone})
+                    next = True
+                elif timeDrone >= t_2 * j:
+                    index += 1
+                    j += 1
+                
+            fin = True
+
+
+    def ovalo_open_loop(self, idDrone, initial_pose, f):
+        rospy.loginfo({'action': 'OVALO'})
+        f2 = open("log2 " + str(idDrone) + "-" + time.strftime("%Y%m%d-%H%M%S") + ".txt", "w")
+        # if idDrone == 1:
+        #     self.set_4_speed(0, 0, 30, 0, idDrone)
+        #     time.sleep(3)
+        #     self.set_4_speed(0, 0, 0, 0, idDrone)
+        #     time.sleep(1)
+        # else:
+        #     time.sleep(4)
+
+        initial_pose = self.read_pose(idDrone)
+
+        # Posicion inicial respecto al mundo:
+        tIW = fn.hom(initial_pose.pose.position.x, initial_pose.pose.position.y, initial_pose.pose.position.z,
+                    fn.norm_pi(fn.yaw(initial_pose.pose.orientation)))
+        
+        pts = tr.calcular_puntos_ovalo(fn.loc(tIW), 1, 0.5, 5)
+        index = 0
+        for p in pts:
+            f.write(str(index) + " " + str(p[0]) + " " + str(p[1]) 
+                    + " " + str(p[2]) + " 0 0 " + str(p[3]) + " 0\n")
+            index += 1
+
+        markers = tr.draw_trajectory_ovalo(initial_pose, 1, 0.5, 5, idDrone)
+        self.pubs_draw[idDrone - 1].publish(markers)
+
+        # Ovalo calculando el tiempo según la velocidad lineal y angular
+        v = 0.30
+        w = 0.60 # 1.152 rad/s
+        m = 1
+        
+        # Tiempo para hacer un lado
+        t1 = m / v # - t_delay
+        rospy.loginfo({'tiempo1': t1})
+
+        # Tiempo para girar medio circulo
+        t2 = np.pi / w
+        rospy.loginfo({'tiempo2': t2})
+
+        index = 0
+
+        # Cuando pase el tiempo, siguiente paso
+        t = t1
+        i = 0
+        fin = False
+        while not fin:
+            rospy.loginfo("Paso " + str(i))
+            next = False
+            if i == 0 or i == 2:
+                t = t1
+                self.set_4_speed(0, v * 100, 0, 0, idDrone)
+            else:
+                t = t2
+                self.set_4_speed(0, v * 100 / 1.20, 0, -w * 100 / 1.20, idDrone)
+
+            # Medir tiempo
+            t0 = rospy.Time.now().to_sec()
+            t_log = t / 5
+            j = 0
+            while not next:
+                timeDrone = rospy.Time.now().to_sec() - t0
+
+                pose = self.read_pose(idDrone)
+                position = fn.loc(fn.hom(pose.pose.position.x, pose.pose.position.y, pose.pose.position.z, 
+                    fn.norm_pi(fn.yaw(pose.pose.orientation))))
+                f2.write(str(index) + " " + str(position[0]) + " " + str(position[1]) 
+                    + " " + str(position[2]) + " 0 0 " + str(position[3]) + " 0\n")
+                
+                if timeDrone >= t:
+                    rospy.loginfo({'action': 'start_trajectory', 'time': timeDrone})
+                    next = True
+                elif timeDrone >= t_log * j:
+                    index += 1
+                    j += 1
+                  
+            i = (i + 1) % 4
+            if i == 0:
+                fin = True
+
+    def espiral_open_loop(self, idDrone, initial_pose, f):
+        rospy.loginfo({'action': 'ESPIRAL'})
+        f2 = open("log2 " + str(idDrone) + "-" + time.strftime("%Y%m%d-%H%M%S") + ".txt", "w")
+        # if idDrone == 1:
+        #     self.set_4_speed(0, 0, 30, 0, idDrone)
+        #     time.sleep(3)
+        #     self.set_4_speed(0, 0, 0, 0, idDrone)
+        #     time.sleep(1)
+        # else:
+        #     time.sleep(4)
+
+        initial_pose = self.read_pose(idDrone)
+
+        # Posicion inicial respecto al mundo:
+        tIW = fn.hom(initial_pose.pose.position.x, initial_pose.pose.position.y, initial_pose.pose.position.z,
+                    fn.norm_pi(fn.yaw(initial_pose.pose.orientation)))
+        
+        pts = tr.calcular_puntos_espiral(fn.loc(tIW), 0.5, 0.05, 5)
+        index = 0
+        for p in pts:
+            f.write(str(index) + " " + str(p[0]) + " " + str(p[1]) 
+                    + " " + str(p[2]) + " 0 0 " + str(p[3]) + " 0\n")
+            index += 1
+        index = 0
+
+        markers = tr.draw_trajectory_espiral(initial_pose, 0.5, 0.05, 5, idDrone)
+        self.pubs_draw[idDrone - 1].publish(markers)
+
+        # Espiral calculando el tiempo según la velocidad lineal y angular
+        v = 0.30
+        w = 0.60 # 1.152 rad/s
+        r = v / w
+
+        # Tiempo para hacer una circunferencia
+        t = 2 * np.pi * r / v
+        rospy.loginfo({'tiempo': t})
+
+        # Velocidad para subir 1 m en t segundos
+        v_z = 1 / t
+        rospy.loginfo({'velocidad_z': v_z})
+
+        t_2 = t * 2 / 21 # Cada t_2 segundos se guarda un punto
+
+        i = 0
+        fin = False
+        while not fin:
+            rospy.loginfo("Paso " + str(i))
+            next = False
+            self.set_4_speed(0, v * 100 / 1.20 , 15, -w * 100 / 1.20, idDrone)
+
+            # Medir tiempo
+            t0 = rospy.Time.now().to_sec()
+            j = 0
+            while not next:
+                timeDrone = rospy.Time.now().to_sec() - t0
+                pose = self.read_pose(idDrone)
+                position = fn.loc(fn.hom(pose.pose.position.x, pose.pose.position.y, pose.pose.position.z, 
+                    fn.norm_pi(fn.yaw(pose.pose.orientation))))
+                f2.write(str(index) + " " + str(position[0]) + " " + str(position[1]) 
+                    + " " + str(position[2]) + " 0 0 " + str(position[3]) + " 0\n")
+                if timeDrone >= 2 * t:
+                    rospy.loginfo({'action': 'start_trajectory', 'time': timeDrone})
+                    next = True
+                elif timeDrone >= t_2 * j:
+                    index += 1
+                    j += 1
+                elif timeDrone >= t:
+                    self.set_4_speed(0, v * 100 / 1.20 , 16, -w * 100 / 1.20, idDrone)
+
+            fin = True
+
+
+
+
+    def ocho_closed_loop(self, idDrone, initial_pose, f):
+        rospy.loginfo({'action': 'OCHO'})
+        f2 = open("log2 " + str(idDrone) + "-" + time.strftime("%Y%m%d-%H%M%S") + ".txt", "w")
+
+        vmax = 0.30
+        wmax = 0.80
+        pmax = 1
+        amax = np.pi
+        bmax = np.pi
+
+        # kp > 0;  kb > 0;  ka - kp > 0
+        kp = vmax/pmax
+        ka = wmax/amax
+        kb = wmax/bmax
+
+        kp = 0.3
+        ka = 0.2
+        kb = 0.2
+
+        index = 0
+        # Posicion inicial respecto al mundo:
+        tIW = fn.hom(initial_pose.pose.position.x, initial_pose.pose.position.y, initial_pose.pose.position.z, 
+                    fn.norm_pi(fn.yaw(initial_pose.pose.orientation)))
+        # f.write(str(index) + " " + str(fn.loc(tIW)) + "\n")
+        
+        # Posiciones finales en el mundo:
+        pos = tr.calcular_puntos_ocho(fn.loc(tIW), 0.26, 4)
+
+        pos = [(1,1,0.8,np.pi/2), (1,2,0.8,np.pi/2), (1,3,0.8,np.pi/2)]
+        index = 0
+        for p in pos:
+            x, y, z, w = p
+            f.write(str(index) + " " + str(x) + " " + str(y) + " " + str(z) + " 0 0 " + str(w) + " 0\n")
+            index += 1
+        primero = True
+
+        index = 0
+
+        pos_ant = None
+        w_ant = 0
+        v_ant = 0
+        for i in range(0, len(pos)):
+            WxG = pos[i]
+            
+            esta = False
+            primero = True
+            while not esta:
+                WxR = self.read_pose(idDrone)
+
+                if fn.esta_cerca(WxR, WxG, 0.2, 0.5):
+                    rospy.loginfo("CERCA")
+                    esta = True
+                    index += 1
+                else:
+                    v, w, GxR, primero = fn.calcularVelocidades(WxR, WxG, kp, ka, kb, primero)
+                    # if abs(v - v_ant) > 1:
+                    position = fn.loc(fn.hom(WxR.pose.position.x, WxR.pose.position.y, WxR.pose.position.z, 
+                                             fn.norm_pi(fn.yaw(WxR.pose.orientation))))
+                    f2.write(str(index) + " " + str(position[0]) + " " + str(position[1]) 
+                             + " " + str(position[2]) + " 0 0 " + str(position[3]) + " 0\n")
+                    
+                    primero = True
+                    pos_ant = WxR
+                    w_ant = w
+                    v_ant = v
+
+                    self.set_4_speed(0, round(v,2), 0, round(w, 2), idDrone) 
+
+                    time.sleep(0.4)
+
+        f2.close()
+
+    def cuadrado_closed_loop(self, idDrone, initial_pose, f):
+        rospy.loginfo({'action': 'CUADRADO'})
+        f2 = open("log2 " + str(idDrone) + "-" + time.strftime("%Y%m%d-%H%M%S") + ".txt", "w")
+        index = 0
+
+        # kp > 0;  kb < 0;  ka - kp > 0
+        kp = 0.3
+        ka = 0.5
+        kb =  -0.5
+
+        # Posicion inicial respecto al mundo:
+        tIW = fn.hom(initial_pose.pose.position.x, initial_pose.pose.position.y, initial_pose.pose.position.z, 
+                    fn.norm_pi(fn.yaw(initial_pose.pose.orientation)))
+        
+        # Posiciones finales en el mundo:
+        pos = tr.calcular_puntos_cuadrado(fn.loc(tIW), 1, 1)
+        # pos = [(1, -1, 0.8, 0)]
+        markers = tr.draw_trajectory_cuadrado(initial_pose, 1, 1, idDrone)
+        self.pubs_draw[idDrone - 1].publish(markers)
+
+        # Escribir log
+        index = 0
+        for p in pos:
+            x, y, z, w = p
+            f.write(str(index) + " " + str(x) + " " + str(y) + " " + str(z) + " 0 0 " + str(w) + " 0\n")
+            index += 1
+        index = 0
+
+        t_send_velocities = 2
+
+        for i in range(0, len(pos)):
+            t0 = rospy.Time.now().to_sec()
+            WxG = pos[i]
+            esta = False
+
+            while not esta:
+                t1 = rospy.Time.now().to_sec()
+                if abs(t1 - t0) > t_send_velocities: # Cada 2 o 1 s
+                    WxR = self.read_pose(idDrone)
+
+                    if fn.esta_cerca(WxR, WxG, 0.2, 0.5):
+                        rospy.loginfo("CERCA")
+                        esta = True
+                        index += 1
+                    else:
+                        distancia = fn.distancia(WxR, WxG)
+                        rospy.loginfo("Distancia: " + str(distancia) + " hasta " + str(WxG))
+                        if distancia <= 0.1:
+                            t_send_velocities = 1
+                        else:
+                            t_send_velocities = 2
+                        
+                        # Calcular velocidades
+                        v, w, GxR, a, b = fn.calcularVelocidades(WxR, WxG, kp, ka, kb)
+                        w = -1 * w
+
+                        # Escribir log
+                        position = fn.loc(fn.hom(WxR.pose.position.x, WxR.pose.position.y, WxR.pose.position.z, 
+                                                fn.norm_pi(fn.yaw(WxR.pose.orientation))))
+                        f2.write(str(index) + " " + str(position[0]) + " " + str(position[1]) 
+                                + " " + str(position[2]) + " 0 0 " + str(position[3]) + " 0\n")
+                        
+                        rospy.loginfo({'v': v, 'w': w})
+                        
+                        # Publicar velocidad, alpha y beta
+                        msg = Twist()
+                        msg.linear.x = v
+                        msg.angular.z = w
+                        self.pubs_velocity[idDrone - 1].publish(msg)
+                        self.pubs_a[idDrone - 1].publish(a)
+                        self.pubs_b[idDrone - 1].publish(b)
+
+                        self.set_4_speed(0, v, 0, w, idDrone) 
+                        t0 = rospy.Time.now().to_sec()
+
+                    rospy.loginfo("\n")
+
+        f2.close()
+
+
+    def ovalo_closed_loop(self, idDrone, initial_pose, f):
+        rospy.loginfo({'action': 'OVALO'})
+        f2 = open("log2 " + str(idDrone) + "-" + time.strftime("%Y%m%d-%H%M%S") + ".txt", "w")
+        index = 0
+
+        # kp > 0;  kb < 0;  ka - kp > 0
+        kp = 0.6
+        ka = 0.5
+        kb =  -0.5
+
+        # Posicion inicial respecto al mundo:
+        tIW = fn.hom(initial_pose.pose.position.x, initial_pose.pose.position.y, initial_pose.pose.position.z, 
+                    fn.norm_pi(fn.yaw(initial_pose.pose.orientation)))
+        
+        # Posiciones finales en el mundo:
+        pos = tr.calcular_puntos_ovalo(fn.loc(tIW), 1, 0.5, 2)
+        markers = tr.draw_trajectory_ovalo(initial_pose, 1, 0.5, 2, idDrone)
+        self.pubs_draw[idDrone - 1].publish(markers)
+
+        # Escribir log
+        index = 0
+        for p in pos:
+            x, y, z, w = p
+            f.write(str(index) + " " + str(x) + " " + str(y) + " " + str(z) + " 0 0 " + str(w) + " 0\n")
+            index += 1
+        index = 0
+
+        t_send_velocities = 2
+
+        for i in range(0, len(pos)):
+            t0 = rospy.Time.now().to_sec()
+            WxG = pos[i]
+            esta = False
+
+            while not esta:
+                t1 = rospy.Time.now().to_sec()
+                WxR = self.read_pose(idDrone)
+
+                if fn.esta_cerca(WxR, WxG, 0.1, 5):
+                    rospy.loginfo("CERCA")
+                    esta = True
+                    index += 1
+                else:
+                    distancia = fn.distancia(WxR, WxG)
+                    rospy.loginfo("Distancia: " + str(distancia) + " hasta " + str(WxG))
+                    if distancia <= 0.05:
+                        t_send_velocities = 1
+                    else:
+                        t_send_velocities = 2
+                    
+                    # Calcular velocidades
+                    v, w, GxR, a, b = fn.calcularVelocidades(WxR, WxG, kp, ka, kb)
+                    w = -1 * w
+
+                    # Escribir log
+                    position = fn.loc(fn.hom(WxR.pose.position.x, WxR.pose.position.y, WxR.pose.position.z, 
+                                            fn.norm_pi(fn.yaw(WxR.pose.orientation))))
+                    f2.write(str(index) + " " + str(position[0]) + " " + str(position[1]) 
+                            + " " + str(position[2]) + " 0 0 " + str(position[3]) + " 0\n")
+                    
+                    rospy.loginfo({'v': v, 'w': w})
+                    
+                    # Publicar velocidad, alpha y beta
+                    msg = Twist()
+                    msg.linear.x = v
+                    msg.angular.z = w
+                    self.pubs_velocity[idDrone - 1].publish(msg)
+                    self.pubs_a[idDrone - 1].publish(a)
+                    self.pubs_b[idDrone - 1].publish(b)
+
+                    if abs(t1 - t0) > t_send_velocities: # Cada 2 o 1 s
+
+                        self.set_4_speed(0, v, 0, w, idDrone) 
+                        t0 = rospy.Time.now().to_sec()
+
+                    rospy.loginfo("\n")
+
+        f2.close()
 
