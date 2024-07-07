@@ -1,3 +1,6 @@
+# UTILIZACIÓN DE UN SISTEMA DE CAPTURA DE MOVIMIENTO EXTERNO 
+# PARA EL CONTROL DEL MOVIMIENTO DE EQUIPOS DE DRONES
+
 Aquí se muestran los dos paquetes de ROS necesarios para hacer funcionar el sistema desarrollado,
 mediante el que se utiliza OptiTrack para monitorizar y corregir el movimiento de los drones
 Tello EDU durante la ejecución de distintas trayectorias.
@@ -12,7 +15,7 @@ trayectorias y las funciones de control y conexión con los drones.
 
 --------------------------------------------------------------------------------------------------
 
-Instalación:
+## Instalación:
 
 Una vez que estos dos paquetes se encuentren en la carpeta src de un workspace de ROS, se deben
 compilar con 'catkin build'.
@@ -22,7 +25,7 @@ encuentran en el archivo "requirements.txt" de la carpeta pytello.
 
 --------------------------------------------------------------------------------------------------
 
-Ejecución:
+## Ejecución:
 
 Para lanzar el sistema, se deben seguir los siguientes pasos:
 
