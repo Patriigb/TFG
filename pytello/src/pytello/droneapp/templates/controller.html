@@ -52,13 +52,24 @@
         $('#selectVersionBtn').click(function() {
             selectedVersion = $('input[name="version"]:checked').val();
             $('#trajectoryModal').hide();
-            $('#trajectoryTypeModal').show();
+            if (selectedVersion == 0 || selectedVersion == 1) {
+                $('#trajectoryTypeModal').show();
+            } else {
+                $('#trajectoryTypeModalv2').show();
+            }
             console.log("Selected version:", selectedVersion);
         });
 
         $('#selectTrajectoryBtn').click(function() {
             selectedTrajectory = $('input[name="trajectory"]:checked').val();
             $('#trajectoryTypeModal').hide();
+            sendCommand('startTrajectory', { version: selectedVersion, trajectory: selectedTrajectory });
+            console.log("Selected trajectory:", selectedTrajectory);
+        });
+
+        $('#selectTrajectoryBtnv2').click(function() {
+            selectedTrajectory = $('input[name="trajectory"]:checked').val();
+            $('#trajectoryTypeModalv2').hide();
             sendCommand('startTrajectory', { version: selectedVersion, trajectory: selectedTrajectory });
             console.log("Selected trajectory:", selectedTrajectory);
         });
@@ -173,7 +184,7 @@
 
 <div class="controller-box">
     <h3>Speed</h3>
-    <input type="range" name="slider-2" id="slider-speed" data-highlight="true" min="0" max="100" value="10">
+    <input type="range" name="slider-2" id="slider-speed" data-highlight="true" min="0" max="100" value="10">
 </div>
 
 <div class="controller-box">
@@ -221,12 +232,12 @@
         <label for="cuadrado">Cuadrado</label>
     </div>
     <div>
-        <input type="radio" id="circulo" name="trajectory" value="1">
-        <label for="circulo">Círculo</label>
+        <input type="radio" id="ovalo" name="trajectory" value="1">
+        <label for="ovalo">Óvalo</label>
     </div>
     <div>
-        <input type="radio" id="ovalo" name="trajectory" value="2">
-        <label for="ovalo">Óvalo</label>
+        <input type="radio" id="circulo" name="trajectory" value="2">
+        <label for="circulo">Círculo</label>
     </div>
     <div>
         <input type="radio" id="espiral" name="trajectory" value="3">
@@ -237,6 +248,20 @@
         <label for="ocho">Ocho</label>
     </div>
     <a href="#" data-role="button" id="selectTrajectoryBtn">Seleccionar Trayectoria</a>
+</div>
+
+<!-- Modal para seleccionar tipo de trayectoria -->
+<div id="trajectoryTypeModalv2" style="display: none;">
+    <h3>Seleccionar Tipo de Trayectoria</h3>
+    <div>
+        <input type="radio" id="cuadradov2" name="trajectory" value="0">
+        <label for="cuadradov2">Cuadrado</label>
+    </div>
+    <div>
+        <input type="radio" id="ovalov2" name="trajectory" value="1">
+        <label for="ovalov2">Óvalo</label>
+    </div>
+    <a href="#" data-role="button" id="selectTrajectoryBtnv2">Seleccionar Trayectoria</a>
 </div>
 
 <!-- Checkbox para indicar si usar el drone 1, el drone 2 o ambos -->

@@ -30,7 +30,6 @@ class poseTfBroadcaster {
         }
 
         void poseCallback(geometry_msgs::PoseStamped recieved_pose){
-            //TO-DO  Incluir los nombres de los tf como argumentos
             geometry_msgs::TransformStamped tf_odom_odomNED;
             try{
                 tf_odom_odomNED = tf_buffer_.lookupTransform("odom", "odom_ned", ros::Time(0));

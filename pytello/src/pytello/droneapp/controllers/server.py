@@ -56,8 +56,8 @@ def command():
     try:
         cmd = request.form.get('command')
         idDrone = request.form.get('idDrone') # 0 si son todos, 1 si es el primero, 2 si es el segundo, etc.
-        trajectory = int(request.form.get('trajectory')) # 0: cuadrado, 1: circulo, 2: ovalo, 3: espiral, 4:ocho
-        version = int(request.form.get('version')) # 0: version 1, 1: version 2, 2: version 3
+        trajectory = request.form.get('trajectory') # 0: cuadrado, 1: circulo, 2: ovalo, 3: espiral, 4:ocho
+        version = request.form.get('version') # 0: version 1, 1: version 2, 2: version 3
 
         # Comprobar que el id es menor que el número de drones
         if idDrone is not None:
@@ -67,6 +67,24 @@ def command():
                 idDrone = 0
         else:
             idDrone = 0 # Por defecto, todos los drones
+
+        # Comprobar que la trayectoria es válida
+        if trajectory is not None:
+            trajectory = int(trajectory)
+            if trajectory > 4:
+                rospy.loginfo({'error': 'La trayectoria no es válida'})
+                trajectory = 0
+        else:
+            trajectory = 0
+
+        # Comprobar que la versión es válida
+        if version is not None:
+            version = int(version)
+            if version > 2:
+                rospy.loginfo({'error': 'La versión no es válida'})
+                version = 0
+        else:
+            version = 0
 
         rospy.loginfo({'action': 'command', 'cmd': cmd, 'idDrone': idDrone})
         drone = get_drone()
@@ -107,36 +125,19 @@ def command():
             drone.patrol()
         if cmd == "stopPatrol":
             drone.stop_patrol()
-        # if cmd == 'faceDetectAndTrack':
-        #     drone.enable_face_detect()
-        # if cmd == 'stopFaceDetectAndTrack':
-        #     drone.disable_face_detect()
-        # if cmd == 'snapshot':
-        #     if drone.snapshot():
-        #         return jsonify(status='success'), 200
-        #     else:
-        #         return jsonify(status='fail'), 400
-        # if cmd == 'takeVideo':
-        #     drone.takeVideo()
-        # if cmd == 'stopVideo':
-        #     drone.stopVideo()
-        # if cmd == 'takeFrames':
-        #     drone.takeFrames()
-        # if cmd == 'stopFrames':
-        #     drone.stopFrames()
         if cmd == 'startTrajectory':
             if idDrone == 0:
                 for id_drone in range(len(drones)):
-                    process = Process(target=drone.start_trajectory, args=(id_drone + 1,trajectory,version))
+                    process = Process(target=drone.start_trajectory, args=(id_drone + 1, trajectory, version))
                     process.start()
             else:
                 drone.start_trajectory(idDrone, trajectory, version)
         if cmd == 'stopTrajectory':
-            drone.stop_trajectory(idDrone, trajectory, version)
+            drone.stop_trajectory(idDrone)
         if cmd == 'battery':
             drone.battery(idDrone)
         if cmd == 'draw':
-            drone.draw(idDrone)
+            drone.draw(idDrone, trajectory)
 
         rospy.loginfo(jsonify(status='success'))
         return jsonify(status='success'), 200
@@ -144,20 +145,6 @@ def command():
     except Exception as e:
             rospy.loginfo({'error': str(e)})
             return jsonify(status='fail'), 400
-
-
-# def video_generator():
-#     drone = get_drone()
-#     for jpeg in drone.video_jpeg_generator():
-#         yield (b'--frame\r\n'
-#                b'Content-Type: image/jpeg\r\n\r\n' +
-#                jpeg +
-#                b'\r\n\r\n')
-
-
-# @app.route('/video/streaming')
-# def video_feed():
-#     return Response(video_generator(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
 def run(_drones):

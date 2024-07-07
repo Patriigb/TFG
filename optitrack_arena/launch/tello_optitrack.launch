@@ -1,8 +1,5 @@
 <launch>
-<!-- vim: set ft=xml noet : -->
-
   <arg name="server" default="192.168.0.100"/>
-
   <node pkg="vrpn_client_ros" type="vrpn_client_node" name="vrpn_client_node" output="screen">
     <rosparam subst_value="true">
       server: $(arg server)
@@ -24,10 +21,6 @@
     <remap from="/vrpn_client_node/tello_1/pose" to="/optitrack/pose_1" />
     <remap from="/vrpn_client_node/tello_2/pose" to="/optitrack/pose_2" />
   </node>
-
   <node pkg="tf" type="static_transform_publisher" name="broadcaster_odom" args="$0 0 0 1.57 0 3.14 odom odom_ned 100" />
-  
-  <!-- Node to change the tf of the pose given by optitrack to match it with mavros-->
   <node pkg="optitrack_arena" type="optitrack_pose_tf" name="optitrack_pose_tf" output="screen"/>
-
 </launch>

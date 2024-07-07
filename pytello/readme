@@ -1,6 +1,0 @@
-Cómo instalar y abrir plotjuggler:
-- sudo apt install ros-$ROS_DISTRO-plotjuggler-ros
-- rosrun plotjuggler plotjuggler
-
-Grabar topic:
-- rosbag record -o path1 /tello_1/path
