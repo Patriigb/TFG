@@ -1,7 +1,6 @@
-# UTILIZACIÓN DE UN SISTEMA DE CAPTURA DE MOVIMIENTO EXTERNO 
-# PARA EL CONTROL DEL MOVIMIENTO DE EQUIPOS DE DRONES
+# UTILIZACIÓN DE UN SISTEMA DE CAPTURA DE MOVIMIENTO EXTERNO PARA EL CONTROL DEL MOVIMIENTO DE EQUIPOS DE DRONES
 
-Aquí se muestran los dos paquetes de ROS necesarios para hacer funcionar el sistema desarrollado,
+Aquí se muestran los dos paquetes de ROS necesarios para hacer funcionar el sistema desarrollado, 
 mediante el que se utiliza OptiTrack para monitorizar y corregir el movimiento de los drones
 Tello EDU durante la ejecución de distintas trayectorias.
 
